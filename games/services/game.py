@@ -6,19 +6,20 @@ from .moves import get_captures_for_piece, get_quiet_moves_for_piece
 from .types import BLACK_PLAYER, Board, Coords, Player, ROWS, WHITE_PLAYER
 
 
-def get_winner_by_board(board: Board, turn: Player) -> Optional[Player]:
-    white_count = 0
-    black_count = 0
+def count_pieces(board: Board, player: Player) -> int:
+    total = 0
 
-    for r in range(ROWS):
-        for c in range(len(board[r])):
-            p = board[r][c]
-            if p is None:
-                continue
-            if p.color == WHITE_PLAYER:
-                white_count += 1
-            else:
-                black_count += 1
+    for row in board:
+        for piece in row:
+            if piece is not None and piece.color == player:
+                total += 1
+
+    return total
+
+
+def get_winner_by_board(board: Board, turn: Player) -> Optional[Player]:
+    white_count = count_pieces(board, WHITE_PLAYER)
+    black_count = count_pieces(board, BLACK_PLAYER)
 
     if white_count == 0 and black_count == 0:
         return None

@@ -22,6 +22,20 @@ from .types import (
 )
 
 
+def _king_diagonals() -> tuple[tuple[int, int], ...]:
+    return ((-1, -1), (-1, 1), (1, -1), (1, 1))
+
+
+def _piece_directions(piece: Piece, *, for_capture: bool) -> tuple[int, ...]:
+    if piece.is_king:
+        return (WHITE_DIRECTION, BLACK_DIRECTION)
+    if for_capture and MEN_CAN_CAPTURE_BACKWARDS:
+        return (WHITE_DIRECTION, BLACK_DIRECTION)
+    if piece.color == WHITE_PLAYER:
+        return (WHITE_DIRECTION,)
+    return (BLACK_DIRECTION,)
+
+
 def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
     piece = get_piece(board, origin.r, origin.c)
     if piece is None or piece.color != turn:
@@ -30,8 +44,7 @@ def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> lis
     moves: list[Move] = []
 
     if piece.is_king and FLYING_KINGS:
-        diagonals = ((-1, -1), (-1, 1), (1, -1), (1, 1))
-        for dr, dc in diagonals:
+        for dr, dc in _king_diagonals():
             r = origin.r + dr
             c = origin.c + dc
             while is_inside(r, c) and get_piece(board, r, c) is None:
@@ -40,12 +53,7 @@ def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> lis
                 c += dc
         return moves
 
-    if piece.is_king:
-        directions = (WHITE_DIRECTION, BLACK_DIRECTION)
-    else:
-        directions = (WHITE_DIRECTION,) if piece.color == WHITE_PLAYER else (BLACK_DIRECTION,)
-
-    for dir_ in directions:
+    for dir_ in _piece_directions(piece, for_capture=False):
         for side in SIDES:
             to = Coords(origin.r + dir_ * MOVE_STEP, origin.c + side)
             if is_inside(to.r, to.c) and get_piece(board, to.r, to.c) is None:
@@ -62,9 +70,7 @@ def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[M
     captures: list[Move] = []
 
     if piece.is_king and FLYING_KINGS:
-        diagonals = ((-1, -1), (-1, 1), (1, -1), (1, 1))
-
-        for dr, dc in diagonals:
+        for dr, dc in _king_diagonals():
             r = origin.r + dr
             c = origin.c + dc
 
@@ -95,14 +101,7 @@ def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[M
 
         return captures
 
-    if piece.is_king:
-        directions = (WHITE_DIRECTION, BLACK_DIRECTION)
-    elif MEN_CAN_CAPTURE_BACKWARDS:
-        directions = (WHITE_DIRECTION, BLACK_DIRECTION)
-    else:
-        directions = (WHITE_DIRECTION,) if piece.color == WHITE_PLAYER else (BLACK_DIRECTION,)
-
-    for dir_ in directions:
+    for dir_ in _piece_directions(piece, for_capture=True):
         for side in SIDES:
             mid = Coords(origin.r + dir_ * MOVE_STEP, origin.c + side)
             to = Coords(origin.r + dir_ * JUMP_STEP, origin.c + side * JUMP_STEP)

@@ -1,7 +1,6 @@
 import uuid
 
 from django.db import models
-from django.utils import timezone
 
 
 class Game(models.Model):
@@ -21,9 +20,6 @@ class Game(models.Model):
     move_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    white_time_remaining = models.IntegerField(default=300)
-    black_time_remaining = models.IntegerField(default=300)
-    last_turn_started_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
         return f"Game {self.id} ({self.status})"
@@ -38,13 +34,10 @@ class MoveEntry(models.Model):
     captured_pos = models.JSONField(null=True, blank=True)
     is_promoted = models.BooleanField(default=False)
     board_before = models.JSONField()
-    white_time_before = models.PositiveIntegerField()
-    black_time_before = models.PositiveIntegerField()
-    last_turn_started_at_before = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["created_at"]
+        ordering = ["created_at", "id"]
 
     def __str__(self) -> str:
         return f"{self.player_side}: {self.from_pos} -> {self.to_pos}"

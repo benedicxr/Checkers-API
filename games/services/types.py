@@ -45,9 +45,3 @@ class Move:
 
 
 Board = list[list[Optional[Piece]]]
-
-
-@dataclass(frozen=True, slots=True)
-class InitialState:
-    board: Board
-    next_id: int
