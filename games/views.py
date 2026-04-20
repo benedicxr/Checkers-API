@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.viewsets import ViewSet
 
 from .models import Game
 from .serializers import GameStateSerializer, MoveEntrySerializer, MovePayloadSerializer
@@ -19,74 +22,68 @@ RULE_ERROR_STATUS_CODES = {
 }
 
 
-@api_view(["POST"])
-def initialize_game(request: Request) -> Response:
-    """POST /api/games/"""
-    game = orchestrator.create_new_game()
-    return _game_response(game, status_code=status.HTTP_201_CREATED)
+class GameViewSet(ViewSet):
+    def create(self, request: Request) -> Response:
+        """POST /api/games/"""
+        game = orchestrator.create_new_game()
+        return _game_response(game, status_code=status.HTTP_201_CREATED)
 
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        """GET /api/games/{id}/"""
+        game = self._get_game(pk)
+        return _game_response(game)
 
-@api_view(["GET"])
-def fetch_game(request: Request, game_id: str) -> Response:
-    """GET /api/games/{id}/"""
-    game = get_object_or_404(Game, pk=game_id)
-    return _game_response(game)
+    @action(detail=True, methods=["get", "post"], url_path="moves")
+    def moves(self, request: Request, pk: str | None = None) -> Response:
+        """GET/POST /api/games/{id}/moves/"""
+        if request.method == "GET":
+            game = self._get_game(pk)
+            history = orchestrator.get_move_history(game)
+            serializer = MoveEntrySerializer(history, many=True)
+            return Response(serializer.data)
 
+        payload = MovePayloadSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        clean_data = payload.validated_data
 
-@api_view(["GET", "POST"])
-def moves(request: Request, game_id: str) -> Response:
-    """GET/POST /api/games/{id}/moves/"""
-    if request.method == "GET":
-        return _move_history_response(game_id)
-    return _move_creation_response(request, game_id)
+        try:
+            with transaction.atomic():
+                game = self._get_game_for_update(pk)
+                updated_game = orchestrator.process_move_request(
+                    game,
+                    from_dict=clean_data["from_pos"],
+                    to_dict=clean_data["to_pos"],
+                )
+        except orchestrator.OrchestratorRuleError as exc:
+            return _rule_error_response(exc.error, game=exc.game)
 
+        return _game_response(updated_game)
 
-def _move_creation_response(request: Request, game_id: str) -> Response:
-    payload = MovePayloadSerializer(data=request.data)
-    payload.is_valid(raise_exception=True)
+    @action(detail=True, methods=["post"], url_path="undo")
+    def undo(self, request: Request, pk: str | None = None) -> Response:
+        """POST /api/games/{id}/undo/"""
+        try:
+            with transaction.atomic():
+                game = self._get_game_for_update(pk)
+                updated_game = orchestrator.revert_last_move(game)
+        except orchestrator.OrchestratorRuleError as exc:
+            return _rule_error_response(exc.error, game=exc.game)
 
-    clean_data = payload.validated_data
-    try:
+        return _game_response(updated_game, status_code=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="restart")
+    def restart(self, request: Request, pk: str | None = None) -> Response:
+        """POST /api/games/{id}/restart/"""
         with transaction.atomic():
-            game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
-            updated_game = orchestrator.process_move_request(
-                game,
-                from_dict=clean_data["from_pos"],
-                to_dict=clean_data["to_pos"],
-            )
-    except orchestrator.OrchestratorRuleError as exc:
-        return _rule_error_response(exc.error, game=exc.game)
+            game = self._get_game_for_update(pk)
+            updated_game = orchestrator.restart_game(game)
+        return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
-    return _game_response(updated_game)
+    def _get_game(self, pk: str | None) -> Game:
+        return get_object_or_404(Game, pk=pk)
 
-
-@api_view(["POST"])
-def undo_move(request: Request, game_id: str) -> Response:
-    """POST /api/games/{id}/undo/"""
-    try:
-        with transaction.atomic():
-            game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
-            updated_game = orchestrator.revert_last_move(game)
-    except orchestrator.OrchestratorRuleError as exc:
-        return _rule_error_response(exc.error, game=exc.game)
-
-    return _game_response(updated_game, status_code=status.HTTP_200_OK)
-
-
-@api_view(["POST"])
-def restart_game(request: Request, game_id: str) -> Response:
-    """POST /api/games/{id}/restart/"""
-    with transaction.atomic():
-        game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
-        updated_game = orchestrator.restart_game(game)
-    return _game_response(updated_game, status_code=status.HTTP_200_OK)
-
-
-def _move_history_response(game_id: str) -> Response:
-    game = get_object_or_404(Game, pk=game_id)
-    history = orchestrator.get_move_history(game)
-    serializer = MoveEntrySerializer(history, many=True)
-    return Response(serializer.data)
+    def _get_game_for_update(self, pk: str | None) -> Game:
+        return get_object_or_404(Game.objects.select_for_update(), pk=pk)
 
 
 def _rule_error_response(exc, game=None) -> Response:
