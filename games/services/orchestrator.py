@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from django.db import transaction
+
 from ..models import Game, MoveEntry
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
@@ -19,6 +21,7 @@ class OrchestratorRuleError(Exception):
         return str(self.error)
 
 
+@transaction.atomic
 def create_new_game() -> Game:
     initial_board = create_initial_board()
     return Game.objects.create(
@@ -34,6 +37,7 @@ def get_move_history(game: Game):
     return game.moves.order_by("created_at", "id")
 
 
+@transaction.atomic
 def process_move_request(
     game: Game,
     *,
@@ -97,6 +101,7 @@ def process_move_request(
     return game
 
 
+@transaction.atomic
 def revert_last_move(game: Game) -> Game:
     last_move = game.moves.order_by("-created_at", "-id").first()
     if last_move is None:
@@ -124,6 +129,7 @@ def revert_last_move(game: Game) -> Game:
     return game
 
 
+@transaction.atomic
 def restart_game(game: Game) -> Game:
     initial_board = create_initial_board()
 
