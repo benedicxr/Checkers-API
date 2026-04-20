@@ -36,6 +36,13 @@ def _piece_directions(piece: Piece, *, for_capture: bool) -> tuple[int, ...]:
     return (BLACK_DIRECTION,)
 
 
+def _maybe_promote(piece: Piece, dest_row: int) -> Piece:
+    promotion_row = 0 if piece.color == WHITE_PLAYER else ROWS - 1
+    if not piece.is_king and dest_row == promotion_row:
+        return Piece(id=piece.id, color=piece.color, is_king=True)
+    return piece
+
+
 def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
     piece = get_piece(board, origin.r, origin.c)
     if piece is None or piece.color != turn:
@@ -145,10 +152,7 @@ def apply_move(board: Board, move: Move) -> Board:
         next_b[move.captured.r][move.captured.c] = None
 
     placed = next_b[move.to.r][move.to.c]
-    if placed is not None and not placed.is_king:
-        if placed.color == WHITE_PLAYER and move.to.r == 0:
-            next_b[move.to.r][move.to.c] = Piece(id=placed.id, color=placed.color, is_king=True)
-        elif placed.color == BLACK_PLAYER and move.to.r == ROWS - 1:
-            next_b[move.to.r][move.to.c] = Piece(id=placed.id, color=placed.color, is_king=True)
+    if placed is not None:
+        next_b[move.to.r][move.to.c] = _maybe_promote(placed, move.to.r)
 
     return next_b
