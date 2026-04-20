@@ -55,6 +55,16 @@ class GameStateSerializer(serializers.ModelSerializer):
             "createdAt",
             "updatedAt",
         )
+        read_only_fields = (
+            "id",
+            "board",
+            "current_turn",
+            "status",
+            "winner",
+            "move_count",
+            "created_at",
+            "updated_at",
+        )
 
     def get_board(self, obj: Game) -> list[list[dict[str, Any] | None]]:
         serialized_board: list[list[dict[str, Any] | None]] = []
