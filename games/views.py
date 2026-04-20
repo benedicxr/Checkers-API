@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from .models import Game
 from .serializers import GameStateSerializer, MoveEntrySerializer, MovePayloadSerializer
 from .services import orchestrator
 
@@ -22,7 +24,7 @@ def initialize_game(request: Request) -> Response:
 @api_view(["GET"])
 def fetch_game(request: Request, game_id: str) -> Response:
     """GET /api/games/{id}/"""
-    game = orchestrator.get_game(game_id)
+    game = get_object_or_404(Game, pk=game_id)
     return _game_response(game)
 
 
@@ -35,11 +37,13 @@ def attempt_move(request: Request, game_id: str) -> Response:
 
     clean_data = payload.validated_data
     try:
-        updated_game = orchestrator.process_move_request(
-            game_id,
-            from_dict=clean_data["from_pos"],
-            to_dict=clean_data["to_pos"],
-        )
+        with transaction.atomic():
+            game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
+            updated_game = orchestrator.process_move_request(
+                game,
+                from_dict=clean_data["from_pos"],
+                to_dict=clean_data["to_pos"],
+            )
     except orchestrator.OrchestratorRuleError as exc:
         return _rule_error_response(exc.error, game=exc.game)
 
@@ -50,7 +54,9 @@ def attempt_move(request: Request, game_id: str) -> Response:
 def undo_move(request: Request, game_id: str) -> Response:
     """POST /api/games/{id}/undo/"""
     try:
-        updated_game = orchestrator.revert_last_move(game_id)
+        with transaction.atomic():
+            game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
+            updated_game = orchestrator.revert_last_move(game)
     except orchestrator.OrchestratorRuleError as exc:
         return _rule_error_response(exc.error, game=exc.game)
 
@@ -60,14 +66,17 @@ def undo_move(request: Request, game_id: str) -> Response:
 @api_view(["POST"])
 def restart_game(request: Request, game_id: str) -> Response:
     """POST /api/games/{id}/restart/"""
-    updated_game = orchestrator.restart_game(game_id)
+    with transaction.atomic():
+        game = get_object_or_404(Game.objects.select_for_update(), pk=game_id)
+        updated_game = orchestrator.restart_game(game)
     return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
 def fetch_moves(request: Request, game_id: str) -> Response:
     """GET /api/games/{id}/moves/"""
-    history = orchestrator.get_move_history(game_id)
+    game = get_object_or_404(Game, pk=game_id)
+    history = orchestrator.get_move_history(game)
     serializer = MoveEntrySerializer(history, many=True)
     return Response(serializer.data)
 

@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from django.shortcuts import get_object_or_404
-from rest_framework import status
-
 from ..models import Game, MoveEntry
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
@@ -33,28 +30,22 @@ def create_new_game() -> Game:
     )
 
 
-def get_game(game_id: str) -> Game:
-    return get_object_or_404(Game, pk=game_id)
-
-
-def get_move_history(game_id: str):
-    game = get_game(game_id)
+def get_move_history(game: Game):
     return game.moves.order_by("created_at", "id")
 
 
 def process_move_request(
-    game_id: str,
+    game: Game,
     *,
     from_dict: dict[str, int],
     to_dict: dict[str, int],
 ) -> Game:
-    game = _get_game_for_update(game_id)
     if game.status == Game.Status.FINISHED:
         raise OrchestratorRuleError(
             GameRuleError(
                 code="game_finished",
                 detail="The game is already finished.",
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=409,
             )
         )
 
@@ -77,7 +68,7 @@ def process_move_request(
             exc = GameRuleError(
                 code="invalid_board_state",
                 detail=str(exc),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=500,
             )
         raise OrchestratorRuleError(exc, game=game) from exc
 
@@ -108,15 +99,14 @@ def process_move_request(
     return game
 
 
-def revert_last_move(game_id: str) -> Game:
-    game = _get_game_for_update(game_id)
+def revert_last_move(game: Game) -> Game:
     last_move = game.moves.order_by("-created_at", "-id").first()
     if last_move is None:
         raise OrchestratorRuleError(
             GameRuleError(
                 code="no_moves_to_undo",
                 detail="There are no moves to undo.",
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=409,
             )
         )
 
@@ -137,8 +127,7 @@ def revert_last_move(game_id: str) -> Game:
     return game
 
 
-def restart_game(game_id: str) -> Game:
-    game = _get_game_for_update(game_id)
+def restart_game(game: Game) -> Game:
     initial_board = create_initial_board()
 
     game.board = serialize_board(initial_board)
@@ -156,10 +145,6 @@ def restart_game(game_id: str) -> Game:
         "move_count",
     )
     return game
-
-
-def _get_game_for_update(game_id: str) -> Game:
-    return get_object_or_404(Game.objects.select_for_update(), pk=game_id)
 
 
 def _get_latest_move_context(game: Game) -> MoveContext | None:
