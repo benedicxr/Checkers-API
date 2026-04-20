@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -45,8 +43,7 @@ def moves(request: Request, game_id: str) -> Response:
 
 def _move_creation_response(request: Request, game_id: str) -> Response:
     payload = MovePayloadSerializer(data=request.data)
-    if not payload.is_valid():
-        return _validation_error_response(payload.errors)
+    payload.is_valid(raise_exception=True)
 
     clean_data = payload.validated_data
     try:
@@ -90,19 +87,6 @@ def _move_history_response(game_id: str) -> Response:
     history = orchestrator.get_move_history(game)
     serializer = MoveEntrySerializer(history, many=True)
     return Response(serializer.data)
-
-
-def _validation_error_response(errors: Any) -> Response:
-    return Response(
-        {
-            "error": {
-                "code": "validation_error",
-                "detail": "The request payload is invalid.",
-                "fields": errors,
-            }
-        },
-        status=status.HTTP_400_BAD_REQUEST,
-    )
 
 
 def _rule_error_response(exc, game=None) -> Response:
