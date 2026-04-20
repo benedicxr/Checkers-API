@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from .models import Game
 from .services.board import create_initial_board
+from .services.exceptions import GameErrorCode
 from .services.serialization import serialize_board
 from .services.types import BLACK_PLAYER, Board, Piece, WHITE_PLAYER
 
@@ -112,7 +113,7 @@ class GameApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         payload = response.json()
-        self.assertEqual(payload["error"]["code"], "mandatory_capture")
+        self.assertEqual(payload["error"]["code"], GameErrorCode.MANDATORY_CAPTURE)
 
     def test_capture_chain_must_continue_with_same_piece(self):
         board = empty_board()
@@ -146,8 +147,10 @@ class GameApiTests(TestCase):
 
         self.assertEqual(wrong_piece_response.status_code, 400)
         wrong_piece_payload = wrong_piece_response.json()
-        self.assertEqual(wrong_piece_payload["error"]["code"], "capture_continuation_required")
-        self.assertEqual(wrong_piece_payload["error"]["requiredFrom"], {"row": 3, "col": 2})
+        self.assertEqual(
+            wrong_piece_payload["error"]["code"],
+            GameErrorCode.CAPTURE_CONTINUATION_REQUIRED,
+        )
 
         second_capture = self.post_json(
             reverse("game-move", args=[game.id]),

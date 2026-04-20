@@ -12,6 +12,13 @@ from rest_framework.response import Response
 from .models import Game
 from .serializers import GameStateSerializer, MoveEntrySerializer, MovePayloadSerializer
 from .services import orchestrator
+from .services.exceptions import GameErrorCode
+
+RULE_ERROR_STATUS_CODES = {
+    GameErrorCode.GAME_FINISHED: status.HTTP_409_CONFLICT,
+    GameErrorCode.NO_MOVES_TO_UNDO: status.HTTP_409_CONFLICT,
+    GameErrorCode.INVALID_BOARD_STATE: status.HTTP_500_INTERNAL_SERVER_ERROR,
+}
 
 
 @api_view(["POST"])
@@ -101,13 +108,15 @@ def _rule_error_response(exc, game=None) -> Response:
             "detail": exc.detail,
         }
     }
-    if exc.extra:
-        payload["error"].update(exc.extra)
-    if game is not None:
+    if game is not None:    
         payload["game"] = GameStateSerializer(game).data
-    return Response(payload, status=exc.status_code)
+    return Response(payload, status=_status_code_for_rule_error(exc.code))
 
 
 def _game_response(game, *, status_code: int = status.HTTP_200_OK) -> Response:
     serializer = GameStateSerializer(game)
     return Response(serializer.data, status=status_code)
+
+
+def _status_code_for_rule_error(error_code: GameErrorCode) -> int:
+    return RULE_ERROR_STATUS_CODES.get(error_code, status.HTTP_400_BAD_REQUEST)

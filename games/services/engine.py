@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .board import get_piece
-from .exceptions import GameRuleError
+from .exceptions import GameErrorCode, GameRuleError
 from .game import count_pieces, get_winner_by_board
 from .moves import apply_move, get_captures_for_piece, get_valid_moves_for_piece
 from .types import BLACK_PLAYER, Board, Coords, Move, Player, WHITE_PLAYER
@@ -64,25 +64,19 @@ def apply_player_move(
     piece = get_piece(board, origin.r, origin.c)
     if piece is None:
         raise GameRuleError(
-            code="piece_not_found",
+            code=GameErrorCode.PIECE_NOT_FOUND,
             detail="No piece was found at the selected origin square.",
         )
     if piece.color != turn:
         raise GameRuleError(
-            code="wrong_turn",
+            code=GameErrorCode.WRONG_TURN,
             detail="The selected piece does not belong to the active player.",
         )
 
     if forced_origin is not None and origin != forced_origin:
         raise GameRuleError(
-            code="capture_continuation_required",
+            code=GameErrorCode.CAPTURE_CONTINUATION_REQUIRED,
             detail="The current capture chain must continue with the same piece.",
-            extra={
-                "requiredFrom": {
-                    "row": forced_origin.r,
-                    "col": forced_origin.c,
-                }
-            },
         )
 
     captures_for_origin = get_captures_for_piece(board, turn, origin)
@@ -97,7 +91,7 @@ def apply_player_move(
 
     if any_capture_available and not captures_for_origin:
         raise GameRuleError(
-            code="mandatory_capture",
+            code=GameErrorCode.MANDATORY_CAPTURE,
             detail="A capture is available and must be played.",
         )
 
@@ -109,7 +103,7 @@ def apply_player_move(
 
     if selected_move is None:
         raise GameRuleError(
-            code="illegal_move",
+            code=GameErrorCode.ILLEGAL_MOVE,
             detail="The requested move is not legal in the current position.",
         )
 

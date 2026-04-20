@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from ..models import Game, MoveEntry
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
-from .exceptions import GameRuleError
+from .exceptions import GameRuleError, GameErrorCode
 from .serialization import deserialize_board, serialize_board
 from .types import Coords
 
@@ -43,9 +43,8 @@ def process_move_request(
     if game.status == Game.Status.FINISHED:
         raise OrchestratorRuleError(
             GameRuleError(
-                code="game_finished",
+                code=GameErrorCode.GAME_FINISHED,
                 detail="The game is already finished.",
-                status_code=409,
             )
         )
 
@@ -66,9 +65,8 @@ def process_move_request(
     except (GameRuleError, ValueError) as exc:
         if isinstance(exc, ValueError):
             exc = GameRuleError(
-                code="invalid_board_state",
+                code=GameErrorCode.INVALID_BOARD_STATE,
                 detail=str(exc),
-                status_code=500,
             )
         raise OrchestratorRuleError(exc, game=game) from exc
 
@@ -104,9 +102,8 @@ def revert_last_move(game: Game) -> Game:
     if last_move is None:
         raise OrchestratorRuleError(
             GameRuleError(
-                code="no_moves_to_undo",
+                code=GameErrorCode.NO_MOVES_TO_UNDO,
                 detail="There are no moves to undo.",
-                status_code=409,
             )
         )
 
