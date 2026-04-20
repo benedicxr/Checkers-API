@@ -11,6 +11,8 @@ from .exceptions import GameRuleError, GameErrorCode
 from .serialization import deserialize_board, serialize_board
 from .types import Coords
 
+_GAME_UPDATE_FIELDS = ("board", "current_turn", "status", "winner", "move_count")
+
 
 @dataclass(slots=True)
 class OrchestratorRuleError(Exception):
@@ -90,14 +92,7 @@ def process_move_request(
     game.status = move_result.status
     game.winner = move_result.winner
     game.move_count += 1
-    _save_game(
-        game,
-        "board",
-        "current_turn",
-        "status",
-        "winner",
-        "move_count",
-    )
+    _save_game(game, *_GAME_UPDATE_FIELDS)
     return game
 
 
@@ -118,14 +113,7 @@ def revert_last_move(game: Game) -> Game:
     game.winner = None
     game.move_count = max(game.move_count - 1, 0)
     last_move.delete()
-    _save_game(
-        game,
-        "board",
-        "current_turn",
-        "status",
-        "winner",
-        "move_count",
-    )
+    _save_game(game, *_GAME_UPDATE_FIELDS)
     return game
 
 
@@ -139,14 +127,7 @@ def restart_game(game: Game) -> Game:
     game.winner = None
     game.move_count = 0
     game.moves.all().delete()
-    _save_game(
-        game,
-        "board",
-        "current_turn",
-        "status",
-        "winner",
-        "move_count",
-    )
+    _save_game(game, *_GAME_UPDATE_FIELDS)
     return game
 
 
