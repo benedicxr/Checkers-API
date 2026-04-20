@@ -73,7 +73,7 @@ class GameApiTests(TestCase):
         game = self.create_game()
 
         response = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 0},
                 "to": {"row": 4, "col": 1},
@@ -104,7 +104,7 @@ class GameApiTests(TestCase):
         game = self.create_game(board=board)
 
         response = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 4},
                 "to": {"row": 4, "col": 5},
@@ -124,7 +124,7 @@ class GameApiTests(TestCase):
         game = self.create_game(board=board)
 
         first_capture = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 0},
                 "to": {"row": 3, "col": 2},
@@ -138,7 +138,7 @@ class GameApiTests(TestCase):
         self.assertIsNone(first_payload["board"][4][1])
 
         wrong_piece_response = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 4},
                 "to": {"row": 4, "col": 5},
@@ -153,7 +153,7 @@ class GameApiTests(TestCase):
         )
 
         second_capture = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 3, "col": 2},
                 "to": {"row": 1, "col": 4},
@@ -170,7 +170,7 @@ class GameApiTests(TestCase):
         game = self.create_game()
 
         move_response = self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 0},
                 "to": {"row": 4, "col": 1},
@@ -193,7 +193,7 @@ class GameApiTests(TestCase):
     def test_restart_resets_state_and_clears_history(self):
         game = self.create_game()
         self.post_json(
-            reverse("game-move", args=[game.id]),
+            reverse("game-moves", args=[game.id]),
             {
                 "from": {"row": 5, "col": 0},
                 "to": {"row": 4, "col": 1},

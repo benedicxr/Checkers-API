@@ -35,9 +35,15 @@ def fetch_game(request: Request, game_id: str) -> Response:
     return _game_response(game)
 
 
-@api_view(["POST"])
-def attempt_move(request: Request, game_id: str) -> Response:
-    """POST /api/games/{id}/move/"""
+@api_view(["GET", "POST"])
+def moves(request: Request, game_id: str) -> Response:
+    """GET/POST /api/games/{id}/moves/"""
+    if request.method == "GET":
+        return _move_history_response(game_id)
+    return _move_creation_response(request, game_id)
+
+
+def _move_creation_response(request: Request, game_id: str) -> Response:
     payload = MovePayloadSerializer(data=request.data)
     if not payload.is_valid():
         return _validation_error_response(payload.errors)
@@ -79,9 +85,7 @@ def restart_game(request: Request, game_id: str) -> Response:
     return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
 
-@api_view(["GET"])
-def fetch_moves(request: Request, game_id: str) -> Response:
-    """GET /api/games/{id}/moves/"""
+def _move_history_response(game_id: str) -> Response:
     game = get_object_or_404(Game, pk=game_id)
     history = orchestrator.get_move_history(game)
     serializer = MoveEntrySerializer(history, many=True)
