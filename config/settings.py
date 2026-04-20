@@ -124,3 +124,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+REST_FRAMEWORK = {
+    'EXCEPTION_HANDLER': 'games.exception_handler.custom_exception_handler',
+}
