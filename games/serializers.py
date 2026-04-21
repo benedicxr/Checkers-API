@@ -30,8 +30,8 @@ class MovePayloadSerializer(serializers.Serializer):
             raise serializers.ValidationError("Expected a JSON object.")
 
         normalized_data = {
-            "from_pos": data.get("from", data.get("from_pos", serializers.empty)),
-            "to_pos": data.get("to", data.get("to_pos", serializers.empty)),
+            "from_pos": data.get("from"),
+            "to_pos": data.get("to"),
         }
         return super().to_internal_value(normalized_data)
 
@@ -58,12 +58,12 @@ class GameStateSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "board",
-            "current_turn",
+            "currentTurn",
             "status",
             "winner",
-            "move_count",
-            "created_at",
-            "updated_at",
+            "moveCount",
+            "createdAt",
+            "updatedAt",
         )
 
     def get_board(self, obj: Game) -> list[list[dict[str, Any] | None]]:
