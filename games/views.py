@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
+from django.http import Http404
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -65,10 +67,16 @@ class GameViewSet(ViewSet):
         return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
     def _get_game(self, pk: str | None) -> Game:
-        return get_object_or_404(Game, pk=pk)
+        try:
+            return get_object_or_404(Game, pk=pk)
+        except (ValueError, ValidationError):
+            raise Http404
 
     def _get_game_for_update(self, pk: str | None) -> Game:
-        return get_object_or_404(Game.objects.select_for_update(), pk=pk)
+        try:
+            return get_object_or_404(Game.objects.select_for_update(), pk=pk)
+        except (ValueError, ValidationError):
+            raise Http404
 
 
 def _game_response(game, *, status_code: int = status.HTTP_200_OK) -> Response:
