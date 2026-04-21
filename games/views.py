@@ -39,31 +39,27 @@ class GameViewSet(ViewSet):
         payload.is_valid(raise_exception=True)
         clean_data = payload.validated_data
 
-        with transaction.atomic():
-            game = self._get_game_for_update(pk)
-            updated_game = orchestrator.process_move_request(
-                game,
-                from_dict=clean_data["from_pos"],
-                to_dict=clean_data["to_pos"],
-            )
+        game = self._get_game_for_update(pk)
+        updated_game = orchestrator.process_move_request(
+            game,
+            from_dict=clean_data["from_pos"],
+            to_dict=clean_data["to_pos"],
+        )
 
         return _game_response(updated_game)
 
     @action(detail=True, methods=["post"], url_path="undo")
     def undo(self, request: Request, pk: str | None = None) -> Response:
         """POST /api/games/{id}/undo/"""
-        with transaction.atomic():
-            game = self._get_game_for_update(pk)
-            updated_game = orchestrator.revert_last_move(game)
-
+        game = self._get_game_for_update(pk)
+        updated_game = orchestrator.revert_last_move(game)
         return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="restart")
     def restart(self, request: Request, pk: str | None = None) -> Response:
         """POST /api/games/{id}/restart/"""
-        with transaction.atomic():
-            game = self._get_game_for_update(pk)
-            updated_game = orchestrator.restart_game(game)
+        game = self._get_game_for_update(pk)
+        updated_game = orchestrator.restart_game(game)
         return _game_response(updated_game, status_code=status.HTTP_200_OK)
 
     def _get_game(self, pk: str | None) -> Game:
