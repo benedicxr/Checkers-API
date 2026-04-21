@@ -68,12 +68,7 @@ def process_move_request(
             destination=_coords_from_payload(to_dict),
             forced_origin=forced_origin,
         )
-    except (GameRuleError, ValueError) as exc:
-        if isinstance(exc, ValueError):
-            exc = GameRuleError(
-                code=GameErrorCode.INVALID_BOARD_STATE,
-                detail=str(exc),
-            )
+    except GameRuleError as exc:
         raise OrchestratorRuleError(exc, game=game) from exc
 
     MoveEntry.objects.create(
