@@ -8,8 +8,9 @@ from ..models import Game, MoveEntry
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
 from .exceptions import GameRuleError, GameErrorCode
+from .moves import get_captures_for_piece, get_valid_moves_for_piece
 from .serialization import deserialize_board, serialize_board
-from .types import Coords
+from .types import Coords, Move
 
 _GAME_UPDATE_FIELDS = ("board", "current_turn", "status", "winner", "move_count")
 
@@ -37,6 +38,39 @@ def create_new_game() -> Game:
 
 def get_move_history(game: Game):
     return game.moves.order_by("created_at", "id")
+
+
+def get_allowed_moves(game: Game) -> list[Move]:
+    if game.status != Game.Status.ACTIVE:
+        return []
+
+    board = deserialize_board(game.board)
+    latest_move = _get_latest_move_context(game)
+    forced_origin = get_pending_capture_origin(board, game.current_turn, latest_move)
+
+    if forced_origin is not None:
+        return get_captures_for_piece(board, game.current_turn, forced_origin)
+
+    any_capture_available = any(
+        get_captures_for_piece(board, game.current_turn, Coords(row_index, col_index))
+        for row_index, row in enumerate(board)
+        for col_index, board_piece in enumerate(row)
+        if board_piece is not None and board_piece.color == game.current_turn
+    )
+
+    allowed_moves: list[Move] = []
+    for row_index, row in enumerate(board):
+        for col_index, board_piece in enumerate(row):
+            if board_piece is None or board_piece.color != game.current_turn:
+                continue
+
+            origin = Coords(row_index, col_index)
+            if any_capture_available:
+                allowed_moves.extend(get_captures_for_piece(board, game.current_turn, origin))
+            else:
+                allowed_moves.extend(get_valid_moves_for_piece(board, game.current_turn, origin))
+
+    return allowed_moves
 
 
 @transaction.atomic

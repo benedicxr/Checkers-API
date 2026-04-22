@@ -5,6 +5,8 @@ from typing import Any
 from rest_framework import serializers
 
 from .models import Game, MoveEntry
+from .services import orchestrator
+from .services.types import Coords, Move
 
 
 class PieceSerializer(serializers.Serializer):
@@ -36,8 +38,30 @@ class MovePayloadSerializer(serializers.Serializer):
         return super().to_internal_value(normalized_data)
 
 
+class AllowedMoveSerializer(serializers.Serializer):
+    fromPos = serializers.SerializerMethodField()
+    toPos = serializers.SerializerMethodField()
+    isCapture = serializers.SerializerMethodField()
+    capturedPos = serializers.SerializerMethodField()
+
+    def get_fromPos(self, obj: Move) -> dict[str, int]:
+        return _coords_to_payload(obj.from_)
+
+    def get_toPos(self, obj: Move) -> dict[str, int]:
+        return _coords_to_payload(obj.to)
+
+    def get_isCapture(self, obj: Move) -> bool:
+        return obj.type == "capture"
+
+    def get_capturedPos(self, obj: Move) -> dict[str, int] | None:
+        if obj.captured is None:
+            return None
+        return _coords_to_payload(obj.captured)
+
+
 class GameStateSerializer(serializers.ModelSerializer):
     board = serializers.SerializerMethodField()
+    allowedMoves = serializers.SerializerMethodField()
     currentTurn = serializers.CharField(source="current_turn")
     moveCount = serializers.IntegerField(source="move_count")
     createdAt = serializers.DateTimeField(source="created_at")
@@ -48,6 +72,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "board",
+            "allowedMoves",
             "currentTurn",
             "status",
             "winner",
@@ -58,6 +83,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "board",
+            "allowedMoves",
             "currentTurn",
             "status",
             "winner",
@@ -77,6 +103,9 @@ class GameStateSerializer(serializers.ModelSerializer):
                     serialized_row.append(PieceSerializer(piece).data)
             serialized_board.append(serialized_row)
         return serialized_board
+
+    def get_allowedMoves(self, obj: Game) -> list[dict[str, Any]]:
+        return AllowedMoveSerializer(orchestrator.get_allowed_moves(obj), many=True).data
 
 
 class MoveEntrySerializer(serializers.ModelSerializer):
@@ -105,3 +134,7 @@ class MoveEntrySerializer(serializers.ModelSerializer):
         if obj.captured_pos is None:
             return None
         return PositionSerializer(obj.captured_pos).data
+
+
+def _coords_to_payload(coords: Coords) -> dict[str, int]:
+    return {"row": coords.r, "col": coords.c}

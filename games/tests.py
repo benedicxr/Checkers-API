@@ -54,6 +54,53 @@ class GameApiTests(TestCase):
         self.assertEqual(payload["status"], Game.Status.ACTIVE)
         self.assertIsNone(payload["winner"])
         self.assertEqual(payload["moveCount"], 0)
+        self.assertEqual(
+            payload["allowedMoves"],
+            [
+                {
+                    "fromPos": {"row": 5, "col": 0},
+                    "toPos": {"row": 4, "col": 1},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 2},
+                    "toPos": {"row": 4, "col": 1},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 2},
+                    "toPos": {"row": 4, "col": 3},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 4},
+                    "toPos": {"row": 4, "col": 3},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 4},
+                    "toPos": {"row": 4, "col": 5},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 6},
+                    "toPos": {"row": 4, "col": 5},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+                {
+                    "fromPos": {"row": 5, "col": 6},
+                    "toPos": {"row": 4, "col": 7},
+                    "isCapture": False,
+                    "capturedPos": None,
+                },
+            ],
+        )
 
         white_pieces = 0
         black_pieces = 0
@@ -136,6 +183,17 @@ class GameApiTests(TestCase):
         self.assertEqual(first_payload["currentTurn"], WHITE_PLAYER)
         self.assertEqual(first_payload["moveCount"], 1)
         self.assertIsNone(first_payload["board"][4][1])
+        self.assertEqual(
+            first_payload["allowedMoves"],
+            [
+                {
+                    "fromPos": {"row": 3, "col": 2},
+                    "toPos": {"row": 1, "col": 4},
+                    "isCapture": True,
+                    "capturedPos": {"row": 2, "col": 3},
+                }
+            ],
+        )
 
         wrong_piece_response = self.post_json(
             reverse("game-moves", args=[game.id]),
@@ -165,6 +223,7 @@ class GameApiTests(TestCase):
         self.assertEqual(second_payload["status"], Game.Status.FINISHED)
         self.assertEqual(second_payload["winner"], WHITE_PLAYER)
         self.assertEqual(second_payload["moveCount"], 2)
+        self.assertEqual(second_payload["allowedMoves"], [])
 
     def test_undo_restores_previous_board_snapshot(self):
         game = self.create_game()
