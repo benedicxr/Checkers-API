@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -9,7 +10,7 @@ from .models import Game
 from .services.board import create_initial_board
 from .services.exceptions import GameErrorCode
 from .services.serialization import serialize_board
-from .services.types import BLACK_PLAYER, Board, Piece, WHITE_PLAYER
+from .services.types import BLACK_PLAYER, Board, Coords, Move, Piece, WHITE_PLAYER
 
 
 def empty_board() -> Board:
@@ -129,19 +130,25 @@ class GameApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["currentTurn"], BLACK_PLAYER)
-        self.assertEqual(payload["moveCount"], 1)
+        self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
+        self.assertEqual(payload["moveCount"], 2)
         self.assertIsNone(payload["board"][5][0])
         self.assertEqual(payload["board"][4][1]["color"], WHITE_PLAYER)
+        self.assertIsNone(payload["board"][2][1])
+        self.assertEqual(payload["board"][3][0]["color"], BLACK_PLAYER)
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
         self.assertEqual(history_response.status_code, 200)
         history_payload = history_response.json()
-        self.assertEqual(len(history_payload), 1)
+        self.assertEqual(len(history_payload), 2)
         self.assertEqual(history_payload[0]["playerSide"], WHITE_PLAYER)
         self.assertEqual(history_payload[0]["fromPos"], {"row": 5, "col": 0})
         self.assertEqual(history_payload[0]["toPos"], {"row": 4, "col": 1})
         self.assertFalse(history_payload[0]["isJump"])
+        self.assertEqual(history_payload[1]["playerSide"], BLACK_PLAYER)
+        self.assertEqual(history_payload[1]["fromPos"], {"row": 2, "col": 1})
+        self.assertEqual(history_payload[1]["toPos"], {"row": 3, "col": 0})
+        self.assertFalse(history_payload[1]["isJump"])
 
     def test_move_requires_capture_when_available(self):
         board = empty_board()
@@ -241,13 +248,15 @@ class GameApiTests(TestCase):
 
         self.assertEqual(undo_response.status_code, 200)
         undo_payload = undo_response.json()
-        self.assertEqual(undo_payload["currentTurn"], WHITE_PLAYER)
-        self.assertEqual(undo_payload["moveCount"], 0)
-        self.assertIsNotNone(undo_payload["board"][5][0])
-        self.assertIsNone(undo_payload["board"][4][1])
+        self.assertEqual(undo_payload["currentTurn"], BLACK_PLAYER)
+        self.assertEqual(undo_payload["moveCount"], 1)
+        self.assertIsNone(undo_payload["board"][5][0])
+        self.assertIsNotNone(undo_payload["board"][4][1])
+        self.assertIsNotNone(undo_payload["board"][2][1])
+        self.assertIsNone(undo_payload["board"][3][0])
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
-        self.assertEqual(history_response.json(), [])
+        self.assertEqual(len(history_response.json()), 1)
 
     def test_restart_resets_state_and_clears_history(self):
         game = self.create_game()
@@ -269,3 +278,29 @@ class GameApiTests(TestCase):
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
         self.assertEqual(history_response.json(), [])
+
+    @patch("games.services.orchestrator.CheckersAIHandler.get_best_move")
+    def test_player_move_can_trigger_ai_response(self, mock_get_best_move):
+        game = self.create_game()
+        mock_get_best_move.return_value = Move(
+            type="simple",
+            from_=Coords(2, 1),
+            to=Coords(3, 0),
+        )
+
+        response = self.post_json(
+            reverse("game-moves", args=[game.id]),
+            {
+                "from": {"row": 5, "col": 0},
+                "to": {"row": 4, "col": 1},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
+        self.assertEqual(payload["moveCount"], 2)
+        self.assertIsNone(payload["board"][2][1])
+        self.assertIsNotNone(payload["board"][3][0])
+        self.assertEqual(payload["board"][3][0]["color"], BLACK_PLAYER)
+        mock_get_best_move.assert_called_once()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
 from django.http import Http404
@@ -45,6 +44,8 @@ class GameViewSet(ViewSet):
             from_dict=clean_data["from_pos"],
             to_dict=clean_data["to_pos"],
         )
+        if updated_game.status == Game.Status.ACTIVE and updated_game.current_turn == Game.Turn.BLACK:
+            updated_game = orchestrator.handle_ai_turn(updated_game.pk)
 
         return _game_response(updated_game)
 

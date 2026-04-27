@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from django.db import transaction
 
 from ..models import Game, MoveEntry
+from .ai import CheckersAIHandler
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
 from .exceptions import GameRuleError, GameErrorCode
 from .moves import get_captures_for_piece, get_valid_moves_for_piece
 from .serialization import deserialize_board, serialize_board
-from .types import Coords, Move
+from .types import BLACK_PLAYER, Coords, Move
 
 _GAME_UPDATE_FIELDS = ("board", "current_turn", "status", "winner", "move_count")
 
@@ -157,6 +158,26 @@ def restart_game(game: Game) -> Game:
     game.move_count = 0
     game.moves.all().delete()
     _save_game(game, *_GAME_UPDATE_FIELDS)
+    return game
+
+
+@transaction.atomic
+def handle_ai_turn(game_id) -> Game:
+    game = Game.objects.select_for_update().get(pk=game_id)
+    ai_handler = CheckersAIHandler()
+
+    while game.status == Game.Status.ACTIVE and game.current_turn == BLACK_PLAYER:
+        allowed_moves = get_allowed_moves(game)
+        if not allowed_moves:
+            break
+
+        selected_move = ai_handler.get_best_move(game.board, allowed_moves)
+        game = process_move_request(
+            game,
+            from_dict=_coords_to_dict(selected_move.from_),
+            to_dict=_coords_to_dict(selected_move.to),
+        )
+
     return game
 
 
