@@ -2,9 +2,36 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TypedDict
 
-from ..types import Move
+from ..types import Coords, Move, Player
+
+
+class AIPiecePayload(TypedDict):
+    id: int
+    color: Player
+    is_king: bool
+
+
+class AICoordsPayload(TypedDict):
+    row: int
+    col: int
+
+
+AIMoveIndexPayload = TypedDict(
+    "AIMoveIndexPayload",
+    {
+        "index": int,
+        "from": AICoordsPayload,
+        "to": AICoordsPayload,
+        "type": str,
+        "captured": AICoordsPayload | None,
+    },
+)
+
+
+BoardState = list[list[AIPiecePayload | None]]
+IndexedMoves = list[AIMoveIndexPayload]
 
 
 class BaseMoveSelector(ABC):
@@ -15,7 +42,7 @@ class BaseMoveSelector(ABC):
 
     def get_best_move(
         self,
-        board_state: list[list[dict[str, Any] | None]],
+        board_state: BoardState,
         allowed_moves: list[Move],
     ) -> Move:
         if not allowed_moves:
@@ -45,16 +72,16 @@ class BaseMoveSelector(ABC):
     def request_move_index(
         self,
         *,
-        board_state: list[list[dict[str, Any] | None]],
-        indexed_moves: list[dict[str, Any]],
-    ) -> Any:
+        board_state: BoardState,
+        indexed_moves: IndexedMoves,
+    ) -> str | None:
         raise NotImplementedError
 
     def build_prompt(
         self,
         *,
-        board_state: list[list[dict[str, Any] | None]],
-        indexed_moves: list[dict[str, Any]],
+        board_state: BoardState,
+        indexed_moves: IndexedMoves,
     ) -> str:
         return (
             "You are a professional checkers player.\n"
@@ -68,8 +95,8 @@ class BaseMoveSelector(ABC):
         )
 
     @staticmethod
-    def extract_index(raw_content: Any, total_moves: int) -> int | None:
-        if not isinstance(raw_content, str):
+    def extract_index(raw_content: str | None, total_moves: int) -> int | None:
+        if raw_content is None:
             return None
 
         candidate = raw_content.strip()
@@ -89,14 +116,18 @@ class BaseMoveSelector(ABC):
         return None
 
     @staticmethod
-    def _index_moves(allowed_moves: list[Move]) -> list[dict[str, Any]]:
+    def _index_moves(allowed_moves: list[Move]) -> IndexedMoves:
         return [
             {
                 "index": index,
-                "from": {"row": move.from_.r, "col": move.from_.c},
-                "to": {"row": move.to.r, "col": move.to.c},
+                "from": _coords_to_payload(move.from_),
+                "to": _coords_to_payload(move.to),
                 "type": move.type,
-                "captured": None if move.captured is None else {"row": move.captured.r, "col": move.captured.c},
+                "captured": None if move.captured is None else _coords_to_payload(move.captured),
             }
             for index, move in enumerate(allowed_moves)
         ]
+
+
+def _coords_to_payload(coords: Coords) -> AICoordsPayload:
+    return {"row": coords.r, "col": coords.c}

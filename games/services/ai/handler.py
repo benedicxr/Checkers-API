@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 
-from .base import BaseMoveSelector
+from ..types import Move
+from .base import BaseMoveSelector, BoardState, IndexedMoves
 from .providers import GeminiMoveSelector
 
 DEFAULT_AI_BACKEND = (os.environ.get("CHECKERS_AI_BACKEND") or "gemini").strip()
@@ -23,10 +24,18 @@ class CheckersAIHandler(BaseMoveSelector):
     def is_available(self) -> bool:
         return self._selector.is_available()
 
-    def request_move_index(self, **kwargs):
-        return self._selector.request_move_index(**kwargs)
+    def request_move_index(
+        self,
+        *,
+        board_state: BoardState,
+        indexed_moves: IndexedMoves,
+    ) -> str | None:
+        return self._selector.request_move_index(
+            board_state=board_state,
+            indexed_moves=indexed_moves,
+        )
 
-    def get_best_move(self, board_state, allowed_moves):
+    def get_best_move(self, board_state: BoardState, allowed_moves: list[Move]) -> Move:
         return self._selector.get_best_move(board_state, allowed_moves)
 
 

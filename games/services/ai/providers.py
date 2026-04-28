@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 try:
     from google import genai
 except ImportError:
     genai = None
 
-from .base import BaseMoveSelector
+from .base import BaseMoveSelector, BoardState, IndexedMoves
 
 
 class GeminiMoveSelector(BaseMoveSelector):
@@ -25,9 +24,9 @@ class GeminiMoveSelector(BaseMoveSelector):
     def request_move_index(
         self,
         *,
-        board_state: list[list[dict[str, Any] | None]],
-        indexed_moves: list[dict[str, Any]],
-    ) -> Any:
+        board_state: BoardState,
+        indexed_moves: IndexedMoves,
+    ) -> str | None:
         response = self._client.models.generate_content(
             model=self.model,
             contents=self.build_prompt(board_state=board_state, indexed_moves=indexed_moves),
