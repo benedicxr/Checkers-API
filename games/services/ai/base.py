@@ -58,11 +58,14 @@ class BaseMoveSelector(ABC):
                 board_state=board_state,
                 indexed_moves=indexed_moves,
             )
-        except Exception as exc:
+        except Exception:
             return allowed_moves[0]
 
         move_index = self.extract_index(raw_content, len(allowed_moves))
-        return allowed_moves[move_index] if move_index is not None else allowed_moves[0]
+        if move_index is None:
+            return allowed_moves[0]
+
+        return allowed_moves[move_index]
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -86,12 +89,14 @@ class BaseMoveSelector(ABC):
         return (
             "You are a professional checkers player.\n"
             "Choose the strongest move from the provided legal moves.\n"
-            "Return only the numeric index of the chosen move.\n\n"
+            "Return a JSON object only.\n"
+            'The response format must be exactly: {"index": <integer>}.\n'
+            "Do not add explanations, markdown, or extra text.\n\n"
             "Current board state JSON:\n"
             f"{json.dumps(board_state, ensure_ascii=True)}\n\n"
             "Legal moves JSON:\n"
             f"{json.dumps(indexed_moves, ensure_ascii=True)}\n\n"
-            "Return only the index."
+            'Return only JSON like {"index": 0}.'
         )
 
     @staticmethod
@@ -103,13 +108,18 @@ class BaseMoveSelector(ABC):
         if not candidate:
             return None
 
+        json_candidate = _strip_code_fences(candidate)
+        parsed_index = _extract_index_from_json(json_candidate)
+        if parsed_index is not None:
+            return parsed_index if 0 <= parsed_index < total_moves else None
+
         try:
             index = int(candidate)
         except ValueError:
-            digits = "".join(ch for ch in candidate if ch.isdigit())
-            if not digits:
+            parsed_index = _extract_index_from_text(candidate)
+            if parsed_index is None:
                 return None
-            index = int(digits)
+            index = parsed_index
 
         if 0 <= index < total_moves:
             return index
@@ -131,3 +141,50 @@ class BaseMoveSelector(ABC):
 
 def _coords_to_payload(coords: Coords) -> AICoordsPayload:
     return {"row": coords.r, "col": coords.c}
+
+
+def _strip_code_fences(content: str) -> str:
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) < 3:
+        return stripped
+
+    if lines[-1].strip() != "```":
+        return stripped
+
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_index_from_json(content: str) -> int | None:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    index = payload.get("index")
+    return index if isinstance(index, int) else None
+
+
+def _extract_index_from_text(content: str) -> int | None:
+    digits: list[str] = []
+    collecting = False
+
+    for char in content:
+        if char.isdigit():
+            digits.append(char)
+            collecting = True
+            continue
+
+        if collecting:
+            break
+
+    if not digits:
+        return None
+
+    return int("".join(digits))

@@ -4,7 +4,7 @@ import os
 
 from ..types import Move
 from .base import BaseMoveSelector, BoardState, IndexedMoves
-from .providers import GeminiMoveSelector
+from .providers import GeminiMoveSelector, GroqMoveSelector, OpenRouterMoveSelector
 
 DEFAULT_AI_BACKEND = (os.environ.get("CHECKERS_AI_BACKEND") or "gemini").strip()
 DEFAULT_AI_MODEL = (os.environ.get("CHECKERS_AI_MODEL") or "gemini-2.5-flash").strip()
@@ -42,6 +42,8 @@ class CheckersAIHandler(BaseMoveSelector):
 def build_move_selector(*, backend: str, model: str) -> BaseMoveSelector:
     registry: dict[str, type[BaseMoveSelector]] = {
         "gemini": GeminiMoveSelector,
+        "openrouter": OpenRouterMoveSelector,
+        "groq": GroqMoveSelector,
     }
     selector_cls = registry.get((backend or "gemini").strip().lower())
     if selector_cls is None:
