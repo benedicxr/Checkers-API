@@ -1,4 +1,4 @@
-from .base import BaseMoveSelector
-from .handler import CheckersAIHandler, build_move_selector
+from .base import BaseProvider
+from .handler import CheckersAIHandler, build_provider
 
-__all__ = ["BaseMoveSelector", "CheckersAIHandler", "build_move_selector"]
+__all__ = ["BaseProvider", "CheckersAIHandler", "build_provider"]

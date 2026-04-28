@@ -34,7 +34,7 @@ BoardState = list[list[AIPiecePayload | None]]
 IndexedMoves = list[AIMoveIndexPayload]
 
 
-class BaseMoveSelector(ABC):
+class BaseProvider(ABC):
     provider_name = "base"
 
     def __init__(self, *, model: str):
