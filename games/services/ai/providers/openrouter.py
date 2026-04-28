@@ -4,7 +4,7 @@ import json
 import os
 from urllib import error, request
 
-from ..base import BaseProvider, BoardState, IndexedMoves
+from ..base import BaseProvider, BoardState, IndexedMoves, ProviderNotConfigured, ProviderRequestFailed
 from .common import extract_chat_completion_text
 
 
@@ -28,7 +28,10 @@ class OpenRouterProvider(BaseProvider):
         indexed_moves: IndexedMoves,
     ) -> str | None:
         if not self._api_key:
-            return None
+            raise ProviderNotConfigured(
+                "OpenRouter client is not configured.",
+                provider_name=self.provider_name,
+            )
 
         payload = json.dumps(
             {
@@ -64,14 +67,26 @@ class OpenRouterProvider(BaseProvider):
         try:
             with request.urlopen(http_request, timeout=30) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
-        except error.HTTPError:
-            return None
-        except error.URLError:
-            return None
-        except TimeoutError:
-            return None
-        except json.JSONDecodeError:
-            return None
+        except error.HTTPError as exc:
+            raise ProviderRequestFailed(
+                "OpenRouter returned an HTTP error.",
+                provider_name=self.provider_name,
+            ) from exc
+        except error.URLError as exc:
+            raise ProviderRequestFailed(
+                "OpenRouter request failed due to a network error.",
+                provider_name=self.provider_name,
+            ) from exc
+        except TimeoutError as exc:
+            raise ProviderRequestFailed(
+                "OpenRouter request timed out.",
+                provider_name=self.provider_name,
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise ProviderRequestFailed(
+                "OpenRouter returned invalid JSON.",
+                provider_name=self.provider_name,
+            ) from exc
 
         return extract_chat_completion_text(response_payload)
 

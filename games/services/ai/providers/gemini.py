@@ -7,7 +7,7 @@ try:
 except ImportError:
     genai = None
 
-from ..base import BaseProvider, BoardState, IndexedMoves
+from ..base import BaseProvider, BoardState, IndexedMoves, ProviderNotConfigured
 
 
 class GeminiProvider(BaseProvider):
@@ -28,7 +28,10 @@ class GeminiProvider(BaseProvider):
         indexed_moves: IndexedMoves,
     ) -> str | None:
         if self._client is None:
-            return None
+            raise ProviderNotConfigured(
+                "Gemini client is not configured.",
+                provider_name=self.provider_name,
+            )
 
         response = self._client.models.generate_content(
             model=self.model,

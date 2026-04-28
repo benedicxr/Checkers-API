@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
+from django.core.checks import Error, Warning
 from django.test import TestCase
 from django.urls import reverse
 
 from .models import Game
+from .checks import check_primary_ai_provider
+from .services.ai import BaseProvider, CheckersAIHandler, ProviderNotConfigured
+from .services.ai.handler import build_provider_chain
+from .services.ai.providers import FirstLegalMoveProvider
 from .services.board import create_initial_board
 from .services.exceptions import GameErrorCode
 from .services.serialization import serialize_board
@@ -304,3 +310,113 @@ class GameApiTests(TestCase):
         self.assertIsNotNone(payload["board"][3][0])
         self.assertEqual(payload["board"][3][0]["color"], BLACK_PLAYER)
         mock_get_best_move.assert_called_once()
+
+
+class _UnavailableProvider(BaseProvider):
+    provider_name = "UnavailableProvider"
+
+    def is_available(self) -> bool:
+        return False
+
+    def request_move_index(self, *, board_state, indexed_moves):
+        raise AssertionError("request_move_index should not be called")
+
+
+class _FixedMoveProvider(BaseProvider):
+    provider_name = "FixedMoveProvider"
+
+    def __init__(self, *, model: str, raw_content: str):
+        super().__init__(model=model)
+        self.raw_content = raw_content
+
+    def is_available(self) -> bool:
+        return True
+
+    def request_move_index(self, *, board_state, indexed_moves):
+        return self.raw_content
+
+
+class AIProviderTests(TestCase):
+    def test_provider_raises_when_not_configured(self):
+        provider = _UnavailableProvider(model="test")
+
+        with self.assertRaises(ProviderNotConfigured):
+            provider.get_best_move([], [Move(type="simple", from_=Coords(5, 0), to=Coords(4, 1))])
+
+    @patch("games.services.ai.handler.logger")
+    def test_handler_falls_through_to_next_provider(self, mock_logger):
+        moves = [
+            Move(type="simple", from_=Coords(5, 0), to=Coords(4, 1)),
+            Move(type="simple", from_=Coords(5, 2), to=Coords(4, 3)),
+        ]
+        handler = CheckersAIHandler(
+            providers=[
+                _UnavailableProvider(model="missing"),
+                _FixedMoveProvider(model="working", raw_content='{"index": 1}'),
+            ]
+        )
+
+        selected_move = handler.get_best_move([], moves)
+
+        self.assertEqual(selected_move, moves[1])
+        mock_logger.warning.assert_called_once()
+
+    @patch("games.services.ai.handler.logger")
+    def test_handler_uses_terminal_fallback_provider(self, mock_logger):
+        moves = [
+            Move(type="simple", from_=Coords(5, 0), to=Coords(4, 1)),
+            Move(type="simple", from_=Coords(5, 2), to=Coords(4, 3)),
+        ]
+        handler = CheckersAIHandler(
+            providers=[
+                _FixedMoveProvider(model="broken", raw_content='{"index": 99}'),
+                FirstLegalMoveProvider(),
+            ]
+        )
+
+        selected_move = handler.get_best_move([], moves)
+
+        self.assertEqual(selected_move, moves[0])
+        self.assertEqual(mock_logger.warning.call_count, 2)
+
+    def test_build_provider_chain_appends_first_legal_fallback(self):
+        providers = build_provider_chain(backend="gemini", model="gemini-2.5-flash")
+
+        self.assertEqual(providers[-1].provider_name, "FirstLegalMoveProvider")
+
+    def test_build_provider_chain_preserves_configured_provider_order(self):
+        providers = build_provider_chain(backend="groq,gemini", model="test-model")
+
+        self.assertEqual(
+            [provider.provider_name for provider in providers],
+            ["GroqProvider", "GeminiProvider", "FirstLegalMoveProvider"],
+        )
+
+
+class AIStartupChecksTests(TestCase):
+    @patch("games.checks.get_primary_provider")
+    def test_startup_check_warns_when_primary_provider_is_unavailable(self, mock_get_primary_provider):
+        provider = MagicMock()
+        provider.provider_name = "GeminiProvider"
+        provider.is_available.return_value = False
+        mock_get_primary_provider.return_value = provider
+
+        messages = check_primary_ai_provider(None)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIsInstance(messages[0], Warning)
+        self.assertEqual(messages[0].id, "games.W001")
+
+    @patch.dict("os.environ", {"CHECKERS_AI_FAIL_FAST": "true"}, clear=False)
+    @patch("games.checks.get_primary_provider")
+    def test_startup_check_can_fail_fast(self, mock_get_primary_provider):
+        provider = MagicMock()
+        provider.provider_name = "GeminiProvider"
+        provider.is_available.return_value = False
+        mock_get_primary_provider.return_value = provider
+
+        messages = check_primary_ai_provider(None)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIsInstance(messages[0], Error)
+        self.assertEqual(messages[0].id, "games.E002")

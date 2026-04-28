@@ -7,7 +7,7 @@ try:
 except ImportError:
     Groq = None
 
-from ..base import BaseProvider, BoardState, IndexedMoves
+from ..base import BaseProvider, BoardState, IndexedMoves, ProviderNotConfigured
 
 
 class GroqProvider(BaseProvider):
@@ -28,7 +28,10 @@ class GroqProvider(BaseProvider):
         indexed_moves: IndexedMoves,
     ) -> str | None:
         if self._client is None:
-            return None
+            raise ProviderNotConfigured(
+                "Groq client is not configured.",
+                provider_name=self.provider_name,
+            )
 
         response = self._client.chat.completions.create(
             model=self.model,

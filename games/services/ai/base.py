@@ -34,6 +34,24 @@ BoardState = list[list[AIPiecePayload | None]]
 IndexedMoves = list[AIMoveIndexPayload]
 
 
+class ProviderError(Exception):
+    def __init__(self, message: str, *, provider_name: str):
+        super().__init__(message)
+        self.provider_name = provider_name
+
+
+class ProviderNotConfigured(ProviderError):
+    pass
+
+
+class ProviderRequestFailed(ProviderError):
+    pass
+
+
+class ProviderInvalidResponse(ProviderError):
+    pass
+
+
 class BaseProvider(ABC):
     provider_name = "base"
 
@@ -49,7 +67,10 @@ class BaseProvider(ABC):
             raise ValueError("allowed_moves must contain at least one move.")
 
         if not self.is_available():
-            return allowed_moves[0]
+            raise ProviderNotConfigured(
+                f"{self.provider_name} is not configured or unavailable.",
+                provider_name=self.provider_name,
+            )
 
         indexed_moves = self._index_moves(allowed_moves)
 
@@ -58,12 +79,19 @@ class BaseProvider(ABC):
                 board_state=board_state,
                 indexed_moves=indexed_moves,
             )
-        except Exception:
-            return allowed_moves[0]
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderRequestFailed(
+                f"{self.provider_name} request failed.",
+                provider_name=self.provider_name,
+            ) from exc
 
-        move_index = self.extract_index(raw_content, len(allowed_moves))
-        if move_index is None:
-            return allowed_moves[0]
+        move_index = self.extract_index(
+            raw_content,
+            len(allowed_moves),
+            provider_name=self.provider_name,
+        )
 
         return allowed_moves[move_index]
 
@@ -100,30 +128,52 @@ class BaseProvider(ABC):
         )
 
     @staticmethod
-    def extract_index(raw_content: str | None, total_moves: int) -> int | None:
+    def extract_index(
+        raw_content: str | None,
+        total_moves: int,
+        *,
+        provider_name: str,
+    ) -> int:
         if raw_content is None:
-            return None
+            raise ProviderInvalidResponse(
+                "Provider response was empty.",
+                provider_name=provider_name,
+            )
 
         candidate = raw_content.strip()
         if not candidate:
-            return None
+            raise ProviderInvalidResponse(
+                "Provider response was blank.",
+                provider_name=provider_name,
+            )
 
         json_candidate = _strip_code_fences(candidate)
         parsed_index = _extract_index_from_json(json_candidate)
         if parsed_index is not None:
-            return parsed_index if 0 <= parsed_index < total_moves else None
+            if 0 <= parsed_index < total_moves:
+                return parsed_index
+            raise ProviderInvalidResponse(
+                f"Provider returned out-of-range index {parsed_index}.",
+                provider_name=provider_name,
+            )
 
         try:
             index = int(candidate)
         except ValueError:
             parsed_index = _extract_index_from_text(candidate)
             if parsed_index is None:
-                return None
+                raise ProviderInvalidResponse(
+                    "Provider response did not contain a parseable move index.",
+                    provider_name=provider_name,
+                )
             index = parsed_index
 
         if 0 <= index < total_moves:
             return index
-        return None
+        raise ProviderInvalidResponse(
+            f"Provider returned out-of-range index {index}.",
+            provider_name=provider_name,
+        )
 
     @staticmethod
     def _index_moves(allowed_moves: list[Move]) -> IndexedMoves:
