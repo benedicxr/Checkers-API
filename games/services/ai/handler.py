@@ -88,6 +88,14 @@ class CheckersAIHandler:
 
     def _record_provider_success(self, provider: BaseProvider) -> None:
         _increment_metric(provider.provider_name, "success")
+        logger.warning(
+            "AI provider selected move: %s (%s)", provider.provider_name, provider.model,
+            extra={
+                "provider": provider.provider_name,
+                "backend": self.backend,
+                "model": provider.model,
+            },
+        )
         if isinstance(provider, FirstLegalMoveProvider):
             logger.warning(
                 "AI provider chain exhausted; using terminal fallback provider.",
@@ -108,13 +116,23 @@ def build_provider(*, backend: str, model: str) -> BaseProvider:
 
 def build_provider_chain(*, backend: str, model: str) -> list[BaseProvider]:
     provider_names = _ordered_provider_names(backend)
-    providers = [build_provider(backend=provider_name, model=model) for provider_name in provider_names]
+    providers = [
+        build_provider(
+            backend=provider_name,
+            model=_resolve_provider_model(provider_name, default_model=model),
+        )
+        for provider_name in provider_names
+    ]
     providers.append(FirstLegalMoveProvider())
     return providers
 
 
 def get_primary_provider(*, backend: str, model: str) -> BaseProvider:
-    return build_provider(backend=_ordered_provider_names(backend)[0], model=model)
+    primary_provider_name = _ordered_provider_names(backend)[0]
+    return build_provider(
+        backend=primary_provider_name,
+        model=_resolve_provider_model(primary_provider_name, default_model=model),
+    )
 
 
 def _ordered_provider_names(backend: str) -> list[str]:
@@ -136,3 +154,11 @@ def _ordered_provider_names(backend: str) -> list[str]:
 
 def _increment_metric(provider_name: str, outcome: str) -> None:
     _AI_PROVIDER_METRICS[f"{provider_name}.{outcome}"] += 1
+
+
+def _resolve_provider_model(provider_name: str, *, default_model: str) -> str:
+    env_var_name = f"CHECKERS_AI_MODEL_{provider_name.upper()}"
+    provider_model = (os.environ.get(env_var_name) or "").strip()
+    if provider_model:
+        return provider_model
+    return default_model

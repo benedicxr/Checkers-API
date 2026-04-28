@@ -11,7 +11,7 @@ from django.urls import reverse
 from .models import Game
 from .checks import check_primary_ai_provider
 from .services.ai import BaseProvider, CheckersAIHandler, ProviderNotConfigured
-from .services.ai.handler import build_provider_chain
+from .services.ai.handler import build_provider_chain, get_primary_provider
 from .services.ai.providers import FirstLegalMoveProvider
 from .services.board import create_initial_board
 from .services.exceptions import GameErrorCode
@@ -391,6 +391,33 @@ class AIProviderTests(TestCase):
             [provider.provider_name for provider in providers],
             ["GroqProvider", "GeminiProvider", "FirstLegalMoveProvider"],
         )
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CHECKERS_AI_MODEL_GROQ": "llama-3.1-8b-instant",
+            "CHECKERS_AI_MODEL_GEMINI": "gemini-2.5-flash",
+        },
+        clear=False,
+    )
+    def test_build_provider_chain_uses_per_provider_models(self):
+        providers = build_provider_chain(backend="groq,gemini", model="shared-model")
+
+        self.assertEqual(
+            [provider.model for provider in providers],
+            ["llama-3.1-8b-instant", "gemini-2.5-flash", "first-legal-move"],
+        )
+
+    @patch.dict(
+        "os.environ",
+        {"CHECKERS_AI_MODEL_GEMINI": "gemini-2.5-flash"},
+        clear=False,
+    )
+    def test_get_primary_provider_uses_provider_specific_model(self):
+        provider = get_primary_provider(backend="gemini,groq", model="shared-model")
+
+        self.assertEqual(provider.provider_name, "GeminiProvider")
+        self.assertEqual(provider.model, "gemini-2.5-flash")
 
 
 class AIStartupChecksTests(TestCase):
