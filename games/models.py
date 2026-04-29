@@ -32,6 +32,8 @@ class MoveEntry(models.Model):
     to_pos = models.JSONField()
     is_jump = models.BooleanField(default=False)
     captured_pos = models.JSONField(null=True, blank=True)
+    captured_positions = models.JSONField(default=list, blank=True)
+    path = models.JSONField(default=list, blank=True)
     is_promoted = models.BooleanField(default=False)
     board_before = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)

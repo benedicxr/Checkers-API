@@ -69,42 +69,56 @@ class GameApiTests(TestCase):
                     "toPos": {"row": 4, "col": 1},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 0}, {"row": 4, "col": 1}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 2},
                     "toPos": {"row": 4, "col": 1},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 2}, {"row": 4, "col": 1}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 2},
                     "toPos": {"row": 4, "col": 3},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 2}, {"row": 4, "col": 3}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 4},
                     "toPos": {"row": 4, "col": 3},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 4}, {"row": 4, "col": 3}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 4},
                     "toPos": {"row": 4, "col": 5},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 4}, {"row": 4, "col": 5}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 6},
                     "toPos": {"row": 4, "col": 5},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 6}, {"row": 4, "col": 5}],
+                    "capturedPositions": [],
                 },
                 {
                     "fromPos": {"row": 5, "col": 6},
                     "toPos": {"row": 4, "col": 7},
                     "isCapture": False,
                     "capturedPos": None,
+                    "path": [{"row": 5, "col": 6}, {"row": 4, "col": 7}],
+                    "capturedPositions": [],
                 },
             ],
         )
@@ -151,10 +165,14 @@ class GameApiTests(TestCase):
         self.assertEqual(history_payload[0]["fromPos"], {"row": 5, "col": 0})
         self.assertEqual(history_payload[0]["toPos"], {"row": 4, "col": 1})
         self.assertFalse(history_payload[0]["isJump"])
+        self.assertEqual(history_payload[0]["capturedPositions"], [])
+        self.assertEqual(history_payload[0]["path"], [{"row": 5, "col": 0}, {"row": 4, "col": 1}])
         self.assertEqual(history_payload[1]["playerSide"], BLACK_PLAYER)
         self.assertEqual(history_payload[1]["fromPos"], {"row": 2, "col": 1})
         self.assertEqual(history_payload[1]["toPos"], {"row": 3, "col": 0})
         self.assertFalse(history_payload[1]["isJump"])
+        self.assertEqual(history_payload[1]["capturedPositions"], [])
+        self.assertEqual(history_payload[1]["path"], [{"row": 2, "col": 1}, {"row": 3, "col": 0}])
 
     def test_move_requires_capture_when_available(self):
         board = empty_board()
@@ -204,6 +222,8 @@ class GameApiTests(TestCase):
                     "toPos": {"row": 1, "col": 4},
                     "isCapture": True,
                     "capturedPos": {"row": 2, "col": 3},
+                    "path": [{"row": 3, "col": 2}, {"row": 1, "col": 4}],
+                    "capturedPositions": [{"row": 2, "col": 3}],
                 }
             ],
         )
@@ -237,6 +257,71 @@ class GameApiTests(TestCase):
         self.assertEqual(second_payload["winner"], WHITE_PLAYER)
         self.assertEqual(second_payload["moveCount"], 2)
         self.assertEqual(second_payload["allowedMoves"], [])
+
+    def test_allowed_moves_include_full_multi_jump_path(self):
+        board = empty_board()
+        board[5][0] = Piece(id=1, color=WHITE_PLAYER)
+        board[4][1] = Piece(id=2, color=BLACK_PLAYER)
+        board[2][3] = Piece(id=3, color=BLACK_PLAYER)
+        game = self.create_game(board=board)
+
+        response = self.client.get(reverse("game-detail", args=[game.id]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload["allowedMoves"],
+            [
+                {
+                    "fromPos": {"row": 5, "col": 0},
+                    "toPos": {"row": 1, "col": 4},
+                    "isCapture": True,
+                    "capturedPos": {"row": 4, "col": 1},
+                    "path": [
+                        {"row": 5, "col": 0},
+                        {"row": 3, "col": 2},
+                        {"row": 1, "col": 4},
+                    ],
+                    "capturedPositions": [
+                        {"row": 4, "col": 1},
+                        {"row": 2, "col": 3},
+                    ],
+                }
+            ],
+        )
+
+        move_response = self.post_json(
+            reverse("game-moves", args=[game.id]),
+            {
+                "from": {"row": 5, "col": 0},
+                "to": {"row": 1, "col": 4},
+            },
+        )
+
+        self.assertEqual(move_response.status_code, 200)
+        move_payload = move_response.json()
+        self.assertIsNone(move_payload["board"][5][0])
+        self.assertIsNone(move_payload["board"][4][1])
+        self.assertIsNone(move_payload["board"][2][3])
+        self.assertEqual(move_payload["board"][1][4]["color"], WHITE_PLAYER)
+
+        history_response = self.client.get(reverse("game-moves", args=[game.id]))
+        self.assertEqual(history_response.status_code, 200)
+        history_payload = history_response.json()
+        self.assertEqual(len(history_payload), 1)
+        self.assertEqual(history_payload[0]["capturedPos"], {"row": 4, "col": 1})
+        self.assertEqual(
+            history_payload[0]["capturedPositions"],
+            [{"row": 4, "col": 1}, {"row": 2, "col": 3}],
+        )
+        self.assertEqual(
+            history_payload[0]["path"],
+            [
+                {"row": 5, "col": 0},
+                {"row": 3, "col": 2},
+                {"row": 1, "col": 4},
+            ],
+        )
 
     def test_undo_restores_previous_board_snapshot(self):
         game = self.create_game()

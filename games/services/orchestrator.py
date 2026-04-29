@@ -113,6 +113,8 @@ def process_move_request(
         to_pos=to_dict,
         is_jump=move_result.move.type == "capture",
         captured_pos=_coords_to_dict(move_result.move.captured),
+        captured_positions=_coords_tuple_to_list(move_result.move.captured_positions),
+        path=_coords_tuple_to_list(move_result.move.path or (move_result.move.from_, move_result.move.to)),
         is_promoted=move_result.is_promoted,
         board_before=board_before,
     )
@@ -201,6 +203,10 @@ def _coords_to_dict(coords: Coords | None) -> dict[str, int] | None:
     if coords is None:
         return None
     return {"row": coords.r, "col": coords.c}
+
+
+def _coords_tuple_to_list(coords_items: tuple[Coords, ...]) -> list[dict[str, int]]:
+    return [_coords_to_dict(coords) for coords in coords_items]
 
 
 def _save_game(game: Game, *fields: str) -> None:

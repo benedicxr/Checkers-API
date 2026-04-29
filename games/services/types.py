@@ -42,6 +42,8 @@ class Move:
     from_: Coords
     to: Coords
     captured: Optional[Coords] = None
+    captured_positions: tuple[Coords, ...] = ()
+    path: tuple[Coords, ...] = ()
 
 
 Board = list[list[Optional[Piece]]]

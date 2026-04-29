@@ -26,6 +26,8 @@ AIMoveIndexPayload = TypedDict(
         "to": AICoordsPayload,
         "type": str,
         "captured": AICoordsPayload | None,
+        "path": list[AICoordsPayload],
+        "captured_positions": list[AICoordsPayload],
     },
 )
 
@@ -184,6 +186,11 @@ class BaseProvider(ABC):
                 "to": _coords_to_payload(move.to),
                 "type": move.type,
                 "captured": None if move.captured is None else _coords_to_payload(move.captured),
+                "path": [_coords_to_payload(coords) for coords in (move.path or (move.from_, move.to))],
+                "captured_positions": [
+                    _coords_to_payload(coords)
+                    for coords in (move.captured_positions or (() if move.captured is None else (move.captured,)))
+                ],
             }
             for index, move in enumerate(allowed_moves)
         ]

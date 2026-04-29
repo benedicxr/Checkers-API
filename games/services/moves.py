@@ -43,6 +43,20 @@ def _maybe_promote(piece: Piece, dest_row: int) -> Piece:
     return piece
 
 
+def _move_path(move: Move) -> tuple[Coords, ...]:
+    if move.path:
+        return move.path
+    return (move.from_, move.to)
+
+
+def _captured_positions(move: Move) -> tuple[Coords, ...]:
+    if move.captured_positions:
+        return move.captured_positions
+    if move.captured is None:
+        return ()
+    return (move.captured,)
+
+
 def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
     piece = get_piece(board, origin.r, origin.c)
     if piece is None or piece.color != turn:
@@ -55,7 +69,7 @@ def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> lis
             r = origin.r + dr
             c = origin.c + dc
             while is_inside(r, c) and get_piece(board, r, c) is None:
-                moves.append(Move(type="simple", from_=origin, to=Coords(r, c)))
+                moves.append(Move(type="simple", from_=origin, to=Coords(r, c), path=(origin, Coords(r, c))))
                 r += dr
                 c += dc
         return moves
@@ -64,12 +78,12 @@ def get_quiet_moves_for_piece(board: Board, turn: Player, origin: Coords) -> lis
         for side in SIDES:
             to = Coords(origin.r + dir_ * MOVE_STEP, origin.c + side)
             if is_inside(to.r, to.c) and get_piece(board, to.r, to.c) is None:
-                moves.append(Move(type="simple", from_=origin, to=to))
+                moves.append(Move(type="simple", from_=origin, to=to, path=(origin, to)))
 
     return moves
 
 
-def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
+def _get_immediate_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
     piece = get_piece(board, origin.r, origin.c)
     if piece is None or piece.color != turn:
         return []
@@ -101,6 +115,8 @@ def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[M
                         from_=origin,
                         to=Coords(land_r, land_c),
                         captured=Coords(r, c),
+                        captured_positions=(Coords(r, c),),
+                        path=(origin, Coords(land_r, land_c)),
                     )
                 )
                 land_r += dr
@@ -120,7 +136,45 @@ def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[M
 
             middle_piece = get_piece(board, mid.r, mid.c)
             if middle_piece is not None and middle_piece.color != piece.color:
-                captures.append(Move(type="capture", from_=origin, to=to, captured=mid))
+                captures.append(
+                    Move(
+                        type="capture",
+                        from_=origin,
+                        to=to,
+                        captured=mid,
+                        captured_positions=(mid,),
+                        path=(origin, to),
+                    )
+                )
+
+    return captures
+
+
+def get_captures_for_piece(board: Board, turn: Player, origin: Coords) -> list[Move]:
+    immediate_captures = _get_immediate_captures_for_piece(board, turn, origin)
+    if not immediate_captures:
+        return []
+
+    captures: list[Move] = []
+    for immediate_capture in immediate_captures:
+        next_board = apply_move(board, immediate_capture)
+        continuations = get_captures_for_piece(next_board, turn, immediate_capture.to)
+
+        if not continuations:
+            captures.append(immediate_capture)
+            continue
+
+        for continuation in continuations:
+            captures.append(
+                Move(
+                    type="capture",
+                    from_=origin,
+                    to=continuation.to,
+                    captured=immediate_capture.captured,
+                    captured_positions=_captured_positions(immediate_capture) + _captured_positions(continuation),
+                    path=_move_path(immediate_capture)[:-1] + _move_path(continuation),
+                )
+            )
 
     return captures
 
@@ -148,8 +202,9 @@ def apply_move(board: Board, move: Move) -> Board:
     next_b[move.from_.r][move.from_.c] = None
     next_b[move.to.r][move.to.c] = piece
 
-    if move.type == "capture" and move.captured is not None:
-        next_b[move.captured.r][move.captured.c] = None
+    if move.type == "capture":
+        for captured in _captured_positions(move):
+            next_b[captured.r][captured.c] = None
 
     placed = next_b[move.to.r][move.to.c]
     if placed is not None:
