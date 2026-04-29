@@ -4,6 +4,10 @@ from django.db import models
 
 
 class Game(models.Model):
+    class Mode(models.TextChoices):
+        VS_AI = "vs_ai", "Vs AI"
+        PVP = "pvp", "Player vs Player"
+
     class Turn(models.TextChoices):
         WHITE = "white", "White"
         BLACK = "black", "Black"
@@ -13,6 +17,7 @@ class Game(models.Model):
         FINISHED = "finished", "Finished"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.VS_AI)
     board = models.JSONField()
     current_turn = models.CharField(max_length=10, choices=Turn.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)

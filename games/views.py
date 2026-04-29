@@ -10,14 +10,16 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 
 from .models import Game
-from .serializers import GameStateSerializer, MoveEntrySerializer, MovePayloadSerializer
+from .serializers import GameCreateSerializer, GameStateSerializer, MoveEntrySerializer, MovePayloadSerializer
 from .services import orchestrator
 
 
 class GameViewSet(ViewSet):
     def create(self, request: Request) -> Response:
         """POST /api/games/"""
-        game = orchestrator.create_new_game()
+        payload = GameCreateSerializer(data=request.data or {})
+        payload.is_valid(raise_exception=True)
+        game = orchestrator.create_new_game_with_mode(mode=payload.validated_data["mode"])
         return _game_response(game, status_code=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
@@ -44,7 +46,11 @@ class GameViewSet(ViewSet):
             from_dict=clean_data["from_pos"],
             to_dict=clean_data["to_pos"],
         )
-        if updated_game.status == Game.Status.ACTIVE and updated_game.current_turn == Game.Turn.BLACK:
+        if (
+            updated_game.mode == Game.Mode.VS_AI
+            and updated_game.status == Game.Status.ACTIVE
+            and updated_game.current_turn == Game.Turn.BLACK
+        ):
             updated_game = orchestrator.handle_ai_turn(updated_game.pk)
 
         return _game_response(updated_game)

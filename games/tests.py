@@ -35,6 +35,7 @@ class GameApiTests(TestCase):
         self,
         *,
         board: Board | None = None,
+        mode: str = Game.Mode.VS_AI,
         current_turn: str = WHITE_PLAYER,
         status_value: str = Game.Status.ACTIVE,
         winner: str | None = None,
@@ -44,6 +45,7 @@ class GameApiTests(TestCase):
             board = create_initial_board()
 
         return Game.objects.create(
+            mode=mode,
             board=serialize_board(board),
             current_turn=current_turn,
             status=status_value,
@@ -57,6 +59,7 @@ class GameApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         payload = response.json()
 
+        self.assertEqual(payload["mode"], Game.Mode.VS_AI)
         self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
         self.assertEqual(payload["status"], Game.Status.ACTIVE)
         self.assertIsNone(payload["winner"])
@@ -323,7 +326,16 @@ class GameApiTests(TestCase):
             ],
         )
 
-    def test_undo_restores_previous_board_snapshot(self):
+    def test_create_game_accepts_pvp_mode(self):
+        response = self.post_json(reverse("game-list"), {"mode": Game.Mode.PVP})
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["mode"], Game.Mode.PVP)
+        self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
+        self.assertEqual(payload["moveCount"], 0)
+
+    def test_undo_restores_previous_player_decision_in_vs_ai_mode(self):
         game = self.create_game()
 
         move_response = self.post_json(
@@ -339,15 +351,61 @@ class GameApiTests(TestCase):
 
         self.assertEqual(undo_response.status_code, 200)
         undo_payload = undo_response.json()
-        self.assertEqual(undo_payload["currentTurn"], BLACK_PLAYER)
-        self.assertEqual(undo_payload["moveCount"], 1)
-        self.assertIsNone(undo_payload["board"][5][0])
-        self.assertIsNotNone(undo_payload["board"][4][1])
+        self.assertEqual(undo_payload["mode"], Game.Mode.VS_AI)
+        self.assertEqual(undo_payload["currentTurn"], WHITE_PLAYER)
+        self.assertEqual(undo_payload["moveCount"], 0)
+        self.assertIsNotNone(undo_payload["board"][5][0])
+        self.assertIsNone(undo_payload["board"][4][1])
         self.assertIsNotNone(undo_payload["board"][2][1])
         self.assertIsNone(undo_payload["board"][3][0])
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
-        self.assertEqual(len(history_response.json()), 1)
+        self.assertEqual(history_response.json(), [])
+
+    @patch("games.services.orchestrator.CheckersAIHandler.get_best_move")
+    def test_undo_reverts_single_ply_in_pvp_mode(self, mock_get_best_move):
+        game = self.create_game(mode=Game.Mode.PVP)
+
+        move_response = self.post_json(
+            reverse("game-moves", args=[game.id]),
+            {
+                "from": {"row": 5, "col": 0},
+                "to": {"row": 4, "col": 1},
+            },
+        )
+        self.assertEqual(move_response.status_code, 200)
+        mock_get_best_move.assert_not_called()
+
+        undo_response = self.post_json(reverse("game-undo", args=[game.id]))
+
+        self.assertEqual(undo_response.status_code, 200)
+        undo_payload = undo_response.json()
+        self.assertEqual(undo_payload["mode"], Game.Mode.PVP)
+        self.assertEqual(undo_payload["currentTurn"], WHITE_PLAYER)
+        self.assertEqual(undo_payload["moveCount"], 0)
+        self.assertIsNotNone(undo_payload["board"][5][0])
+        self.assertIsNone(undo_payload["board"][4][1])
+
+    @patch("games.services.orchestrator.CheckersAIHandler.get_best_move")
+    def test_pvp_mode_does_not_trigger_ai_response(self, mock_get_best_move):
+        game = self.create_game(mode=Game.Mode.PVP)
+
+        response = self.post_json(
+            reverse("game-moves", args=[game.id]),
+            {
+                "from": {"row": 5, "col": 0},
+                "to": {"row": 4, "col": 1},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["mode"], Game.Mode.PVP)
+        self.assertEqual(payload["currentTurn"], BLACK_PLAYER)
+        self.assertEqual(payload["moveCount"], 1)
+        self.assertEqual(payload["board"][4][1]["color"], WHITE_PLAYER)
+        self.assertIsNone(payload["board"][2][1])
+        mock_get_best_move.assert_not_called()
 
     def test_restart_resets_state_and_clears_history(self):
         game = self.create_game()

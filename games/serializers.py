@@ -38,6 +38,14 @@ class MovePayloadSerializer(serializers.Serializer):
         return super().to_internal_value(normalized_data)
 
 
+class GameCreateSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(
+        choices=Game.Mode.choices,
+        default=Game.Mode.VS_AI,
+        required=False,
+    )
+
+
 class AllowedMoveSerializer(serializers.Serializer):
     fromPos = serializers.SerializerMethodField()
     toPos = serializers.SerializerMethodField()
@@ -75,6 +83,7 @@ class AllowedMoveSerializer(serializers.Serializer):
 class GameStateSerializer(serializers.ModelSerializer):
     board = serializers.SerializerMethodField()
     allowedMoves = serializers.SerializerMethodField()
+    mode = serializers.CharField()
     currentTurn = serializers.CharField(source="current_turn")
     moveCount = serializers.IntegerField(source="move_count")
     createdAt = serializers.DateTimeField(source="created_at")
@@ -84,6 +93,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         model = Game
         fields = (
             "id",
+            "mode",
             "board",
             "allowedMoves",
             "currentTurn",
@@ -95,6 +105,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "mode",
             "board",
             "allowedMoves",
             "currentTurn",

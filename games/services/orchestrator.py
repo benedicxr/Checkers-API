@@ -27,8 +27,14 @@ class OrchestratorRuleError(Exception):
 
 @transaction.atomic
 def create_new_game() -> Game:
+    return create_new_game_with_mode(mode=Game.Mode.VS_AI)
+
+
+@transaction.atomic
+def create_new_game_with_mode(*, mode: str) -> Game:
     initial_board = create_initial_board()
     return Game.objects.create(
+        mode=mode,
         board=serialize_board(initial_board),
         current_turn=Game.Turn.WHITE,
         status=Game.Status.ACTIVE,
@@ -130,7 +136,9 @@ def process_move_request(
 
 @transaction.atomic
 def revert_last_move(game: Game) -> Game:
-    last_move = game.moves.order_by("-created_at", "-id").first()
+    moves_to_revert = 2 if game.mode == Game.Mode.VS_AI else 1
+    latest_moves = list(game.moves.order_by("-created_at", "-id")[:moves_to_revert])
+    last_move = latest_moves[0] if latest_moves else None
     if last_move is None:
         raise OrchestratorRuleError(
             GameRuleError(
@@ -139,12 +147,25 @@ def revert_last_move(game: Game) -> Game:
             )
         )
 
-    game.board = last_move.board_before
-    game.current_turn = last_move.player_side
+    restored_move = last_move
+    if (
+        game.mode == Game.Mode.VS_AI
+        and len(latest_moves) == 2
+        and latest_moves[0].player_side == Game.Turn.BLACK
+        and latest_moves[1].player_side == Game.Turn.WHITE
+    ):
+        restored_move = latest_moves[1]
+        latest_moves[0].delete()
+        latest_moves[1].delete()
+        game.move_count = max(game.move_count - 2, 0)
+    else:
+        last_move.delete()
+        game.move_count = max(game.move_count - 1, 0)
+
+    game.board = restored_move.board_before
+    game.current_turn = restored_move.player_side
     game.status = Game.Status.ACTIVE
     game.winner = None
-    game.move_count = max(game.move_count - 1, 0)
-    last_move.delete()
     _save_game(game, *_GAME_UPDATE_FIELDS)
     return game
 
@@ -166,6 +187,9 @@ def restart_game(game: Game) -> Game:
 @transaction.atomic
 def handle_ai_turn(game_id) -> Game:
     game = Game.objects.select_for_update().get(pk=game_id)
+    if game.mode != Game.Mode.VS_AI:
+        return game
+
     ai_handler = CheckersAIHandler()
 
     while game.status == Game.Status.ACTIVE and game.current_turn == BLACK_PLAYER:
