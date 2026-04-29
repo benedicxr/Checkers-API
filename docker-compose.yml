@@ -9,6 +9,27 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: python manage.py rqworker default
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
   frontend:
     build: ../checkers-react

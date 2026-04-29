@@ -197,7 +197,10 @@ def handle_ai_turn(game_id) -> Game:
         if not allowed_moves:
             break
 
-        selected_move = ai_handler.get_best_move(game.board, allowed_moves)
+        if len(allowed_moves) == 1:
+            selected_move = allowed_moves[0]
+        else:
+            selected_move = ai_handler.get_best_move(game.board, allowed_moves)
         game = process_move_request(
             game,
             from_dict=_coords_to_dict(selected_move.from_),

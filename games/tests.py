@@ -35,7 +35,7 @@ class GameApiTests(TestCase):
         self,
         *,
         board: Board | None = None,
-        mode: str = Game.Mode.VS_AI,
+        mode: str = Game.Mode.PVP,
         current_turn: str = WHITE_PLAYER,
         status_value: str = Game.Status.ACTIVE,
         winner: str | None = None,
@@ -153,29 +153,23 @@ class GameApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
-        self.assertEqual(payload["moveCount"], 2)
+        self.assertEqual(payload["currentTurn"], BLACK_PLAYER)
+        self.assertEqual(payload["moveCount"], 1)
         self.assertIsNone(payload["board"][5][0])
         self.assertEqual(payload["board"][4][1]["color"], WHITE_PLAYER)
-        self.assertIsNone(payload["board"][2][1])
-        self.assertEqual(payload["board"][3][0]["color"], BLACK_PLAYER)
+        self.assertIsNotNone(payload["board"][2][1])
+        self.assertIsNone(payload["board"][3][0])
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
         self.assertEqual(history_response.status_code, 200)
         history_payload = history_response.json()
-        self.assertEqual(len(history_payload), 2)
+        self.assertEqual(len(history_payload), 1)
         self.assertEqual(history_payload[0]["playerSide"], WHITE_PLAYER)
         self.assertEqual(history_payload[0]["fromPos"], {"row": 5, "col": 0})
         self.assertEqual(history_payload[0]["toPos"], {"row": 4, "col": 1})
         self.assertFalse(history_payload[0]["isJump"])
         self.assertEqual(history_payload[0]["capturedPositions"], [])
         self.assertEqual(history_payload[0]["path"], [{"row": 5, "col": 0}, {"row": 4, "col": 1}])
-        self.assertEqual(history_payload[1]["playerSide"], BLACK_PLAYER)
-        self.assertEqual(history_payload[1]["fromPos"], {"row": 2, "col": 1})
-        self.assertEqual(history_payload[1]["toPos"], {"row": 3, "col": 0})
-        self.assertFalse(history_payload[1]["isJump"])
-        self.assertEqual(history_payload[1]["capturedPositions"], [])
-        self.assertEqual(history_payload[1]["path"], [{"row": 2, "col": 1}, {"row": 3, "col": 0}])
 
     def test_move_requires_capture_when_available(self):
         board = empty_board()
@@ -336,7 +330,10 @@ class GameApiTests(TestCase):
         self.assertEqual(payload["moveCount"], 0)
 
     def test_undo_restores_previous_player_decision_in_vs_ai_mode(self):
-        game = self.create_game()
+        board = empty_board()
+        board[5][0] = Piece(id=1, color=WHITE_PLAYER)
+        board[2][7] = Piece(id=2, color=BLACK_PLAYER)
+        game = self.create_game(board=board, mode=Game.Mode.VS_AI)
 
         move_response = self.post_json(
             reverse("game-moves", args=[game.id]),
@@ -356,8 +353,8 @@ class GameApiTests(TestCase):
         self.assertEqual(undo_payload["moveCount"], 0)
         self.assertIsNotNone(undo_payload["board"][5][0])
         self.assertIsNone(undo_payload["board"][4][1])
-        self.assertIsNotNone(undo_payload["board"][2][1])
-        self.assertIsNone(undo_payload["board"][3][0])
+        self.assertIsNotNone(undo_payload["board"][2][7])
+        self.assertIsNone(undo_payload["board"][3][6])
 
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
         self.assertEqual(history_response.json(), [])
@@ -428,14 +425,11 @@ class GameApiTests(TestCase):
         history_response = self.client.get(reverse("game-moves", args=[game.id]))
         self.assertEqual(history_response.json(), [])
 
-    @patch("games.services.orchestrator.CheckersAIHandler.get_best_move")
-    def test_player_move_can_trigger_ai_response(self, mock_get_best_move):
-        game = self.create_game()
-        mock_get_best_move.return_value = Move(
-            type="simple",
-            from_=Coords(2, 1),
-            to=Coords(3, 0),
-        )
+    def test_vs_ai_forced_reply_returns_200_immediately(self):
+        board = empty_board()
+        board[5][0] = Piece(id=1, color=WHITE_PLAYER)
+        board[2][7] = Piece(id=2, color=BLACK_PLAYER)
+        game = self.create_game(board=board, mode=Game.Mode.VS_AI)
 
         response = self.post_json(
             reverse("game-moves", args=[game.id]),
@@ -447,12 +441,52 @@ class GameApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["mode"], Game.Mode.VS_AI)
         self.assertEqual(payload["currentTurn"], WHITE_PLAYER)
         self.assertEqual(payload["moveCount"], 2)
-        self.assertIsNone(payload["board"][2][1])
-        self.assertIsNotNone(payload["board"][3][0])
-        self.assertEqual(payload["board"][3][0]["color"], BLACK_PLAYER)
-        mock_get_best_move.assert_called_once()
+        self.assertEqual(payload["board"][4][1]["color"], WHITE_PLAYER)
+        self.assertIsNone(payload["board"][2][7])
+        self.assertEqual(payload["board"][3][6]["color"], BLACK_PLAYER)
+
+    @patch("games.views.process_ai_turn_task.delay")
+    def test_vs_ai_returns_202_and_task_id_when_ai_has_multiple_moves(self, mock_delay):
+        game = self.create_game(mode=Game.Mode.VS_AI)
+        mock_delay.return_value = MagicMock(id="task-123")
+
+        response = self.post_json(
+            reverse("game-moves", args=[game.id]),
+            {
+                "from": {"row": 5, "col": 0},
+                "to": {"row": 4, "col": 1},
+            },
+        )
+
+        self.assertEqual(response.status_code, 202)
+        payload = response.json()
+        self.assertEqual(payload["taskId"], "task-123")
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["game"]["mode"], Game.Mode.VS_AI)
+        self.assertEqual(payload["game"]["currentTurn"], BLACK_PLAYER)
+        self.assertEqual(payload["game"]["moveCount"], 1)
+        mock_delay.assert_called_once()
+
+    @patch("games.views.Job.fetch")
+    def test_task_status_returns_finished_game_state(self, mock_fetch):
+        game = self.create_game(mode=Game.Mode.VS_AI)
+        mock_job = MagicMock()
+        mock_job.get_status.return_value = "finished"
+        mock_job.result = {"game_id": str(game.id)}
+        mock_job.args = [str(game.id)]
+        mock_fetch.return_value = mock_job
+
+        response = self.client.get(reverse("task-status", args=["task-123"]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["taskId"], "task-123")
+        self.assertEqual(payload["status"], "finished")
+        self.assertEqual(payload["gameId"], str(game.id))
+        self.assertEqual(payload["game"]["id"], str(game.id))
 
 
 class _UnavailableProvider(BaseProvider):
