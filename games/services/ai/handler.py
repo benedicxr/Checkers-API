@@ -5,7 +5,15 @@ import os
 from collections import Counter
 
 from ..types import Move
-from .base import BaseProvider, BoardState, IndexedMoves, ProviderError
+from .base import (
+    BaseProvider,
+    BoardState,
+    IndexedMoves,
+    ProviderError,
+    ProviderInvalidResponse,
+    ProviderRequestFailed,
+)
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .providers import (
     FirstLegalMoveProvider,
     GeminiProvider,
@@ -17,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_AI_BACKEND = (os.environ.get("CHECKERS_AI_BACKEND") or "gemini").strip()
 DEFAULT_AI_MODEL = (os.environ.get("CHECKERS_AI_MODEL") or "gemini-2.5-flash").strip()
+DEFAULT_CB_ENABLED = (os.environ.get("CHECKERS_AI_CB_ENABLED") or "true").strip().lower() not in {"0", "false", "no"}
+DEFAULT_CB_FAILURE_THRESHOLD = int(os.environ.get("CHECKERS_AI_CB_FAILURE_THRESHOLD", "2"))
+DEFAULT_CB_RECOVERY_TIMEOUT = int(os.environ.get("CHECKERS_AI_CB_RECOVERY_TIMEOUT", "120"))
 
 _AI_PROVIDER_METRICS: Counter[str] = Counter()
 
@@ -34,10 +45,18 @@ class CheckersAIHandler:
         backend: str = DEFAULT_AI_BACKEND,
         model: str = DEFAULT_AI_MODEL,
         providers: list[BaseProvider] | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
     ):
         self.backend = (backend or "gemini").strip().lower()
         self.model = model
         self._providers = providers or build_provider_chain(backend=self.backend, model=model)
+        self._circuit_breaker = circuit_breaker or CircuitBreaker(
+            config=CircuitBreakerConfig(
+                enabled=DEFAULT_CB_ENABLED,
+                failure_threshold=max(1, DEFAULT_CB_FAILURE_THRESHOLD),
+                recovery_timeout=max(1, DEFAULT_CB_RECOVERY_TIMEOUT),
+            ),
+        )
 
     def is_available(self) -> bool:
         return any(provider.is_available() for provider in self._providers)
@@ -62,16 +81,46 @@ class CheckersAIHandler:
             raise ValueError("allowed_moves must contain at least one move.")
 
         for provider in self._providers:
+            if self._should_skip_provider(provider):
+                continue
+
             try:
                 selected_move = provider.get_best_move(board_state, allowed_moves)
             except ProviderError as exc:
                 self._record_provider_failure(provider, exc)
+                if self._is_circuit_breaker_eligible(provider) and _is_breaker_worthy(exc):
+                    transition = self._circuit_breaker.record_failure(provider.provider_name, provider.model)
+                    self._log_circuit_breaker_transition(provider, transition)
                 continue
 
             self._record_provider_success(provider)
+            if self._is_circuit_breaker_eligible(provider):
+                transition = self._circuit_breaker.record_success(provider.provider_name, provider.model)
+                self._log_circuit_breaker_transition(provider, transition)
             return selected_move
 
         raise RuntimeError("No AI provider was able to select a move.")
+
+    def _should_skip_provider(self, provider: BaseProvider) -> bool:
+        if not self._is_circuit_breaker_eligible(provider):
+            return False
+
+        decision = self._circuit_breaker.allow_request(provider.provider_name, provider.model)
+        self._log_circuit_breaker_transition(provider, decision.transition)
+        if decision.allowed:
+            return False
+
+        _increment_metric(provider.provider_name, "circuit_open")
+        logger.warning(
+            "AI provider circuit breaker blocked request.",
+            extra={
+                "provider": provider.provider_name,
+                "backend": self.backend,
+                "model": provider.model,
+                "breaker_state": decision.state,
+            },
+        )
+        return True
 
     def _record_provider_failure(self, provider: BaseProvider, exc: ProviderError) -> None:
         _increment_metric(provider.provider_name, "failure")
@@ -105,6 +154,24 @@ class CheckersAIHandler:
                     "model": provider.model,
                 },
             )
+
+    @staticmethod
+    def _is_circuit_breaker_eligible(provider: BaseProvider) -> bool:
+        return not isinstance(provider, FirstLegalMoveProvider)
+
+    def _log_circuit_breaker_transition(self, provider: BaseProvider, transition: str | None) -> None:
+        if transition is None:
+            return
+
+        logger.warning(
+            "AI provider circuit breaker transitioned state.",
+            extra={
+                "provider": provider.provider_name,
+                "backend": self.backend,
+                "model": provider.model,
+                "breaker_state": transition,
+            },
+        )
 
 
 def build_provider(*, backend: str, model: str) -> BaseProvider:
@@ -162,3 +229,7 @@ def _resolve_provider_model(provider_name: str, *, default_model: str) -> str:
     if provider_model:
         return provider_model
     return default_model
+
+
+def _is_breaker_worthy(exc: ProviderError) -> bool:
+    return isinstance(exc, (ProviderRequestFailed, ProviderInvalidResponse))

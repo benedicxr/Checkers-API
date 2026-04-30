@@ -10,7 +10,12 @@ from django.urls import reverse
 
 from .models import Game
 from .checks import check_primary_ai_provider
-from .services.ai import BaseProvider, CheckersAIHandler, ProviderNotConfigured
+from .services.ai import BaseProvider, CheckersAIHandler, ProviderNotConfigured, ProviderRequestFailed
+from .services.ai.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    InMemoryCircuitBreakerStore,
+)
 from .services.ai.handler import build_provider_chain, get_primary_provider
 from .services.ai.providers import FirstLegalMoveProvider
 from .services.board import create_initial_board
@@ -513,6 +518,27 @@ class _FixedMoveProvider(BaseProvider):
         return self.raw_content
 
 
+class _FlakyProvider(BaseProvider):
+    provider_name = "FlakyProvider"
+
+    def __init__(self, *, model: str, failures_before_success: int):
+        super().__init__(model=model)
+        self.failures_before_success = failures_before_success
+        self.call_count = 0
+
+    def is_available(self) -> bool:
+        return True
+
+    def request_move_index(self, *, board_state, indexed_moves):
+        self.call_count += 1
+        if self.call_count <= self.failures_before_success:
+            raise ProviderRequestFailed(
+                "temporary upstream failure",
+                provider_name=self.provider_name,
+            )
+        return '{"index": 1}'
+
+
 class AIProviderTests(TestCase):
     def test_provider_raises_when_not_configured(self):
         provider = _UnavailableProvider(model="test")
@@ -536,7 +562,7 @@ class AIProviderTests(TestCase):
         selected_move = handler.get_best_move([], moves)
 
         self.assertEqual(selected_move, moves[1])
-        mock_logger.warning.assert_called_once()
+        self.assertEqual(mock_logger.warning.call_count, 2)
 
     @patch("games.services.ai.handler.logger")
     def test_handler_uses_terminal_fallback_provider(self, mock_logger):
@@ -554,7 +580,7 @@ class AIProviderTests(TestCase):
         selected_move = handler.get_best_move([], moves)
 
         self.assertEqual(selected_move, moves[0])
-        self.assertEqual(mock_logger.warning.call_count, 2)
+        self.assertEqual(mock_logger.warning.call_count, 3)
 
     def test_build_provider_chain_appends_first_legal_fallback(self):
         providers = build_provider_chain(backend="gemini", model="gemini-2.5-flash")
@@ -595,6 +621,59 @@ class AIProviderTests(TestCase):
 
         self.assertEqual(provider.provider_name, "GeminiProvider")
         self.assertEqual(provider.model, "gemini-2.5-flash")
+
+    def test_circuit_breaker_opens_after_repeated_provider_failures(self):
+        provider = _FlakyProvider(model="flaky-model", failures_before_success=2)
+        fallback = _FixedMoveProvider(model="fallback-model", raw_content='{"index": 0}')
+        clock_value = [100.0]
+        handler = CheckersAIHandler(
+            providers=[provider, fallback],
+            circuit_breaker=CircuitBreaker(
+                store=InMemoryCircuitBreakerStore(),
+                config=CircuitBreakerConfig(failure_threshold=2, recovery_timeout=60),
+                clock=lambda: clock_value[0],
+            ),
+        )
+        moves = [
+            Move(type="simple", from_=Coords(5, 0), to=Coords(4, 1)),
+            Move(type="simple", from_=Coords(5, 2), to=Coords(4, 3)),
+        ]
+
+        first_move = handler.get_best_move([], moves)
+        second_move = handler.get_best_move([], moves)
+        third_move = handler.get_best_move([], moves)
+
+        self.assertEqual(first_move, moves[0])
+        self.assertEqual(second_move, moves[0])
+        self.assertEqual(third_move, moves[0])
+        self.assertEqual(provider.call_count, 2)
+
+    def test_circuit_breaker_allows_half_open_recovery_after_timeout(self):
+        provider = _FlakyProvider(model="recovering-model", failures_before_success=2)
+        fallback = _FixedMoveProvider(model="fallback-model", raw_content='{"index": 0}')
+        clock_value = [100.0]
+        handler = CheckersAIHandler(
+            providers=[provider, fallback],
+            circuit_breaker=CircuitBreaker(
+                store=InMemoryCircuitBreakerStore(),
+                config=CircuitBreakerConfig(failure_threshold=2, recovery_timeout=30),
+                clock=lambda: clock_value[0],
+            ),
+        )
+        moves = [
+            Move(type="simple", from_=Coords(5, 0), to=Coords(4, 1)),
+            Move(type="simple", from_=Coords(5, 2), to=Coords(4, 3)),
+        ]
+
+        handler.get_best_move([], moves)
+        handler.get_best_move([], moves)
+        skipped_move = handler.get_best_move([], moves)
+        clock_value[0] = 131.0
+        recovered_move = handler.get_best_move([], moves)
+
+        self.assertEqual(skipped_move, moves[0])
+        self.assertEqual(recovered_move, moves[1])
+        self.assertEqual(provider.call_count, 3)
 
 
 class AIStartupChecksTests(TestCase):
