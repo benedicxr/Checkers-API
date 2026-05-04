@@ -38,11 +38,21 @@ class MovePayloadSerializer(serializers.Serializer):
         return super().to_internal_value(normalized_data)
 
 
+class GameCreateSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(
+        choices=Game.Mode.choices,
+        default=Game.Mode.VS_AI,
+        required=False,
+    )
+
+
 class AllowedMoveSerializer(serializers.Serializer):
     fromPos = serializers.SerializerMethodField()
     toPos = serializers.SerializerMethodField()
     isCapture = serializers.SerializerMethodField()
     capturedPos = serializers.SerializerMethodField()
+    path = serializers.SerializerMethodField()
+    capturedPositions = serializers.SerializerMethodField()
 
     def get_fromPos(self, obj: Move) -> dict[str, int]:
         return _coords_to_payload(obj.from_)
@@ -58,10 +68,22 @@ class AllowedMoveSerializer(serializers.Serializer):
             return None
         return _coords_to_payload(obj.captured)
 
+    def get_path(self, obj: Move) -> list[dict[str, int]]:
+        path = obj.path or (obj.from_, obj.to)
+        return [_coords_to_payload(coords) for coords in path]
+
+    def get_capturedPositions(self, obj: Move) -> list[dict[str, int]]:
+        if obj.captured_positions:
+            return [_coords_to_payload(coords) for coords in obj.captured_positions]
+        if obj.captured is None:
+            return []
+        return [_coords_to_payload(obj.captured)]
+
 
 class GameStateSerializer(serializers.ModelSerializer):
     board = serializers.SerializerMethodField()
     allowedMoves = serializers.SerializerMethodField()
+    mode = serializers.CharField()
     currentTurn = serializers.CharField(source="current_turn")
     moveCount = serializers.IntegerField(source="move_count")
     createdAt = serializers.DateTimeField(source="created_at")
@@ -71,6 +93,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         model = Game
         fields = (
             "id",
+            "mode",
             "board",
             "allowedMoves",
             "currentTurn",
@@ -82,6 +105,7 @@ class GameStateSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "mode",
             "board",
             "allowedMoves",
             "currentTurn",
@@ -114,6 +138,8 @@ class MoveEntrySerializer(serializers.ModelSerializer):
     toPos = PositionSerializer(source="to_pos", read_only=True)
     isJump = serializers.BooleanField(source="is_jump")
     capturedPos = serializers.SerializerMethodField()
+    capturedPositions = PositionSerializer(source="captured_positions", many=True, read_only=True)
+    path = PositionSerializer(many=True, read_only=True)
     isPromoted = serializers.BooleanField(source="is_promoted")
     createdAt = serializers.DateTimeField(source="created_at")
 
@@ -126,6 +152,8 @@ class MoveEntrySerializer(serializers.ModelSerializer):
             "toPos",
             "isJump",
             "capturedPos",
+            "capturedPositions",
+            "path",
             "isPromoted",
             "createdAt",
         )

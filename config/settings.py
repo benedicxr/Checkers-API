@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'django_rq',
     'games',
     
 ]
@@ -127,4 +128,17 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'games.exception_handler.custom_exception_handler',
+}
+
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+
+RQ_QUEUES = {
+    "default": {
+        "HOST": REDIS_HOST,
+        "PORT": REDIS_PORT,
+        "DB": 0,
+        "DEFAULT_TIMEOUT": 600,
+        "DEFAULT_RESULT_TTL": 600,
+    }
 }

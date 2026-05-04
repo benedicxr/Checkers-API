@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from django.db import transaction
 
 from ..models import Game, MoveEntry
+from .ai import CheckersAIHandler
 from .board import create_initial_board
 from .engine import MoveContext, apply_player_move, get_pending_capture_origin
 from .exceptions import GameRuleError, GameErrorCode
 from .moves import get_captures_for_piece, get_valid_moves_for_piece
 from .serialization import deserialize_board, serialize_board
-from .types import Coords, Move
+from .types import BLACK_PLAYER, Coords, Move
 
 _GAME_UPDATE_FIELDS = ("board", "current_turn", "status", "winner", "move_count")
 
@@ -26,8 +27,14 @@ class OrchestratorRuleError(Exception):
 
 @transaction.atomic
 def create_new_game() -> Game:
+    return create_new_game_with_mode(mode=Game.Mode.VS_AI)
+
+
+@transaction.atomic
+def create_new_game_with_mode(*, mode: str) -> Game:
     initial_board = create_initial_board()
     return Game.objects.create(
+        mode=mode,
         board=serialize_board(initial_board),
         current_turn=Game.Turn.WHITE,
         status=Game.Status.ACTIVE,
@@ -112,6 +119,8 @@ def process_move_request(
         to_pos=to_dict,
         is_jump=move_result.move.type == "capture",
         captured_pos=_coords_to_dict(move_result.move.captured),
+        captured_positions=_coords_tuple_to_list(move_result.move.captured_positions),
+        path=_coords_tuple_to_list(move_result.move.path or (move_result.move.from_, move_result.move.to)),
         is_promoted=move_result.is_promoted,
         board_before=board_before,
     )
@@ -127,7 +136,9 @@ def process_move_request(
 
 @transaction.atomic
 def revert_last_move(game: Game) -> Game:
-    last_move = game.moves.order_by("-created_at", "-id").first()
+    moves_to_revert = 2 if game.mode == Game.Mode.VS_AI else 1
+    latest_moves = list(game.moves.order_by("-created_at", "-id")[:moves_to_revert])
+    last_move = latest_moves[0] if latest_moves else None
     if last_move is None:
         raise OrchestratorRuleError(
             GameRuleError(
@@ -136,12 +147,25 @@ def revert_last_move(game: Game) -> Game:
             )
         )
 
-    game.board = last_move.board_before
-    game.current_turn = last_move.player_side
+    restored_move = last_move
+    if (
+        game.mode == Game.Mode.VS_AI
+        and len(latest_moves) == 2
+        and latest_moves[0].player_side == Game.Turn.BLACK
+        and latest_moves[1].player_side == Game.Turn.WHITE
+    ):
+        restored_move = latest_moves[1]
+        latest_moves[0].delete()
+        latest_moves[1].delete()
+        game.move_count = max(game.move_count - 2, 0)
+    else:
+        last_move.delete()
+        game.move_count = max(game.move_count - 1, 0)
+
+    game.board = restored_move.board_before
+    game.current_turn = restored_move.player_side
     game.status = Game.Status.ACTIVE
     game.winner = None
-    game.move_count = max(game.move_count - 1, 0)
-    last_move.delete()
     _save_game(game, *_GAME_UPDATE_FIELDS)
     return game
 
@@ -157,6 +181,32 @@ def restart_game(game: Game) -> Game:
     game.move_count = 0
     game.moves.all().delete()
     _save_game(game, *_GAME_UPDATE_FIELDS)
+    return game
+
+
+@transaction.atomic
+def handle_ai_turn(game_id) -> Game:
+    game = Game.objects.select_for_update().get(pk=game_id)
+    if game.mode != Game.Mode.VS_AI:
+        return game
+
+    ai_handler = CheckersAIHandler()
+
+    while game.status == Game.Status.ACTIVE and game.current_turn == BLACK_PLAYER:
+        allowed_moves = get_allowed_moves(game)
+        if not allowed_moves:
+            break
+
+        if len(allowed_moves) == 1:
+            selected_move = allowed_moves[0]
+        else:
+            selected_move = ai_handler.get_best_move(game.board, allowed_moves)
+        game = process_move_request(
+            game,
+            from_dict=_coords_to_dict(selected_move.from_),
+            to_dict=_coords_to_dict(selected_move.to),
+        )
+
     return game
 
 
@@ -180,6 +230,10 @@ def _coords_to_dict(coords: Coords | None) -> dict[str, int] | None:
     if coords is None:
         return None
     return {"row": coords.r, "col": coords.c}
+
+
+def _coords_tuple_to_list(coords_items: tuple[Coords, ...]) -> list[dict[str, int]]:
+    return [_coords_to_dict(coords) for coords in coords_items]
 
 
 def _save_game(game: Game, *fields: str) -> None:

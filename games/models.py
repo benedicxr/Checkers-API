@@ -4,6 +4,10 @@ from django.db import models
 
 
 class Game(models.Model):
+    class Mode(models.TextChoices):
+        VS_AI = "vs_ai", "Vs AI"
+        PVP = "pvp", "Player vs Player"
+
     class Turn(models.TextChoices):
         WHITE = "white", "White"
         BLACK = "black", "Black"
@@ -13,6 +17,7 @@ class Game(models.Model):
         FINISHED = "finished", "Finished"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.VS_AI)
     board = models.JSONField()
     current_turn = models.CharField(max_length=10, choices=Turn.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
@@ -32,6 +37,8 @@ class MoveEntry(models.Model):
     to_pos = models.JSONField()
     is_jump = models.BooleanField(default=False)
     captured_pos = models.JSONField(null=True, blank=True)
+    captured_positions = models.JSONField(default=list, blank=True)
+    path = models.JSONField(default=list, blank=True)
     is_promoted = models.BooleanField(default=False)
     board_before = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
